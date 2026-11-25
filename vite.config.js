@@ -6,7 +6,25 @@ import path from 'path'
 export default defineConfig({
   plugins: [react()],
   server: {
-    allowedHosts: true
+    allowedHosts: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5214',
+        changeOrigin: true,
+      },
+      '/uploads': {
+        target: 'http://localhost:5214',
+        changeOrigin: true,
+      },
+      '/smartexpedit-app': {
+        target: 'http://localhost:5214',
+        changeOrigin: true,
+      },
+      '/sx-config.js': {
+        target: 'http://localhost:5214',
+        changeOrigin: true,
+      },
+    },
   },
   resolve: {
     alias: {
@@ -21,4 +39,4 @@ export default defineConfig({
       },
     },
   },
-}) 
+})

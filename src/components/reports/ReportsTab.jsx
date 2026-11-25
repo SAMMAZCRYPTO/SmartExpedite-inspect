@@ -28,7 +28,9 @@ import {
   RefreshCw,
   Loader2,
   XCircle,
+  ShieldCheck,
 } from "lucide-react";
+import IssueIrcDialog from "./IssueIrcDialog";
 import { format, isValid, parseISO } from "date-fns";
 import {
   AlertDialog,
@@ -194,27 +196,30 @@ const ReportCard = ({ report, reportType, onDelete, canDelete, onViewReport, onV
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
-              onClick={() => onViewReport(report.url)}
-              title="View Document"
+              disabled={!report.url}
+              className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 disabled:opacity-30"
+              onClick={() => report.url && onViewReport(report.url)}
+              title={report.url ? "View Document" : "No file attached"}
             >
               <Eye className="w-4 h-4" />
             </Button>
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-              onClick={() => window.open(report.url, '_blank')}
-              title="Open in New Tab"
+              disabled={!report.url}
+              className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 disabled:opacity-30"
+              onClick={() => report.url && window.open(report.url, '_blank', 'noopener,noreferrer')}
+              title={report.url ? "Open in New Tab" : "No file attached"}
             >
               <ExternalLink className="w-4 h-4" />
             </Button>
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
-              onClick={(e) => handleDownload(e, report.url, report.name)}
-              title="Download"
+              disabled={!report.url}
+              className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50 disabled:opacity-30"
+              onClick={(e) => report.url && handleDownload(e, report.url, report.name)}
+              title={report.url ? "Download" : "No file attached"}
             >
               <Download className="w-4 h-4" />
             </Button>
@@ -307,6 +312,7 @@ export default function ReportsTab({ inspection, onUploadClick, onDeleteReport, 
   const [analysisResult, setAnalysisResult] = useState(null);
   const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
   const [pendingApproval, setPendingApproval] = useState(null);
+  const [issueIrcOpen, setIssueIrcOpen] = useState(false);
 
   const updateInspectionMutation = useMutation({
     mutationFn: (data) => base44.entities.Inspection.update(inspection.id, data),
@@ -324,29 +330,51 @@ export default function ReportsTab({ inspection, onUploadClick, onDeleteReport, 
     setApprovalDialogOpen(true);
   };
 
-  const confirmApproval = () => {
+  const confirmApproval = async () => {
     if (!pendingApproval) return;
 
     const { report, status } = pendingApproval;
-    const reportIndex = inspectionReports.findIndex(r => r.url === report.url);
+    const reportIndex = inspectionReports.findIndex(r => r.url === report.url && r.name === report.name);
     if (reportIndex === -1) return;
 
-    const updatedReports = inspectionReports.map((r, idx) => {
-      if (idx === reportIndex) {
-        return {
-          ...r,
-          approval_status: status,
-          approved_by: currentUser?.email,
-          approved_date: new Date().toISOString()
-        };
+    try {
+      if (status === "approved") {
+        const res = await fetch(`/api/v1/inspections/${encodeURIComponent(inspection.id)}/ie-approve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            report_id: report.id || null,
+            report_url: report.url || null,
+            comments: approvalNotes || "",
+            approved: true,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "IE approval failed");
+        queryClient.invalidateQueries({ queryKey: ["inspections"] });
+        toast.success("✓ Report endorsed by Inspection Engineer! Authorized for IRC Release.");
+      } else {
+        const updatedReports = inspectionReports.map((r, idx) =>
+          idx === reportIndex
+            ? {
+                ...r,
+                approval_status: "rejected",
+                approved_by: currentUser?.email,
+                approved_date: new Date().toISOString(),
+                rejection_reason: approvalNotes || "",
+              }
+            : r
+        );
+        await updateInspectionMutation.mutateAsync({
+          inspection_reports: updatedReports,
+        });
+        toast.success("Report rejected and returned to inspector for revision.");
       }
-      return r;
-    });
-
-    updateInspectionMutation.mutate({ inspection_reports: updatedReports });
-    toast.success(`Report ${status === 'approved' ? 'approved' : 'rejected'} successfully`);
-    setApprovalDialogOpen(false);
-    setPendingApproval(null);
+      setApprovalDialogOpen(false);
+      setPendingApproval(null);
+    } catch (err) {
+      toast.error(err.message || "Failed to update report status");
+    }
   };
   const [viewingDocumentTitle, setViewingDocumentTitle] = useState("");
   const [viewingFindingsReport, setViewingFindingsReport] = useState(null);
@@ -361,8 +389,8 @@ export default function ReportsTab({ inspection, onUploadClick, onDeleteReport, 
   const isAssignedTPI = isInspectionAgency && inspection.tpi_agency === (currentUser?.company || currentUser?.company_affiliation);
   const isCreator = inspection.created_by === currentUser?.email;
 
-  // Only the creator (Inspection Engineer) or Admin can approve reports
-  const canApprove = (isCreator || isAdmin);
+  // Inspection Engineer, QC Manager, Creator, or Admin can review & endorse reports
+  const canApprove = (isCreator || isAdmin || isInspectionEngineer || isQCManager);
 
   const canUpload = isInspector || isAdmin || isInspectionEngineer || isQCManager || isAssignedTPI || isCreator;
   const canDelete = isAdmin || isInspectionEngineer || isQCManager;
@@ -634,16 +662,26 @@ RETURN FORMAT: JSON object with "findings" array. If NO findings, return empty a
         </Alert>
       )}
 
-      {/* Upload Button */}
-      {canUpload && !isFinalized && (
-        <div className="flex justify-end">
+      {/* Upload and Issue IRC Action Buttons */}
+      {canUpload && (
+        <div className="flex flex-wrap items-center justify-end gap-3">
           <Button
-            onClick={onUploadClick}
-            className="bg-indigo-600 hover:bg-indigo-700"
+            onClick={() => setIssueIrcOpen(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm"
           >
-            <Upload className="w-4 h-4 mr-2" />
-            Upload Reports
+            <ShieldCheck className="w-4 h-4 mr-2" />
+            Issue Release Certificate (IRC)
           </Button>
+          {!isFinalized && (
+            <Button
+              onClick={onUploadClick}
+              variant="outline"
+              className="text-gray-700 font-medium"
+            >
+              <Upload className="w-4 h-4 mr-2" />
+              Upload Reports
+            </Button>
+          )}
         </div>
       )}
 
@@ -1021,6 +1059,17 @@ RETURN FORMAT: JSON object with "findings" array. If NO findings, return empty a
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Official Form-Based IRC Issuance Dialog with PO BOM Reconciler */}
+      <IssueIrcDialog
+        open={issueIrcOpen}
+        onClose={() => setIssueIrcOpen(false)}
+        inspection={inspection}
+        currentUser={currentUser}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["inspections"] });
+        }}
+      />
     </div>
   );
 }

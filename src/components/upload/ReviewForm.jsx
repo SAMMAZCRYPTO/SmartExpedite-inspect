@@ -13,17 +13,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Save, X, AlertCircle, Mail, Users, FileText, AlertTriangle, Clock } from "lucide-react";
+import { Save, X, AlertCircle, Mail, Users, FileText, AlertTriangle, Clock, Trash2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { format, parseISO, isPast, isFuture, differenceInDays, startOfDay, isBefore, isEqual, isValid } from "date-fns";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import ItemsTable from "./ItemsTable";
@@ -108,9 +119,11 @@ const parseRevisionNumber = (revisionStr) => {
   return isNaN(num) ? 0 : num;
 };
 
-export default function ReviewForm({ extractedData, onSave, onCancel, isSaving, currentProjectId, currentUser, showPdf = false }) {
+export default function ReviewForm({ extractedData, onSave, onCancel, onDelete = null, isSaving, currentProjectId, currentUser, showPdf = false }) {
   const [formData, setFormData] = useState({
-    project_id: extractedData.project_id || currentProjectId || "",
+    project_id: (extractedData.project_id && extractedData.project_id !== "all")
+      ? extractedData.project_id
+      : (currentProjectId && currentProjectId !== "all" ? currentProjectId : ""),
     po_number: extractedData.po_number || "",
     notification_number: extractedData.notification_number || "",
     notification_revision: extractedData.notification_revision || "",
@@ -141,10 +154,11 @@ export default function ReviewForm({ extractedData, onSave, onCancel, isSaving, 
   });
 
   const [multiAgencyDialogOpen, setMultiAgencyDialogOpen] = useState(false);
-  const [pdfViewerMode, setPdfViewerMode] = useState('google'); // 'google' or 'native'
+  const [pdfViewerMode, setPdfViewerMode] = useState('native'); // 'native' or 'google'
   const [selectedAgencies, setSelectedAgencies] = useState([]);
   const [validationWarnings, setValidationWarnings] = useState([]);
   const [proceedAnyway, setProceedAnyway] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   // Fetch all inspectors
   const { data: inspectors = [] } = useQuery({
@@ -346,6 +360,24 @@ export default function ReviewForm({ extractedData, onSave, onCancel, isSaving, 
     if (hasErrors && !proceedAnyway) {
       toast.error("Please review validation errors or check 'Proceed Anyway' to continue");
       return;
+    }
+
+    // Issue 2 enforcement: any inspector assigned to an inspection must be registered and active
+    if (formData.assigned_inspector_id || formData.assigned_inspector_name || formData.assigned_inspector_email) {
+      const reg = inspectors.find(
+        (i) =>
+          (formData.assigned_inspector_id && i.id === formData.assigned_inspector_id) ||
+          (formData.assigned_inspector_email &&
+            (i.email || "").toLowerCase() === formData.assigned_inspector_email.toLowerCase())
+      );
+      if (!reg) {
+        toast.error("Unregistered inspector: please select an active registered inspector from the Inspectors directory.");
+        return;
+      }
+      if (String(reg.status || "active").toLowerCase() !== "active") {
+        toast.error(`Inspector ${reg.full_name || reg.email} is currently '${reg.status}' and cannot be assigned.`);
+        return;
+      }
     }
 
     onSave(formData);
@@ -953,31 +985,75 @@ export default function ReviewForm({ extractedData, onSave, onCancel, isSaving, 
         </div>
       </div>
 
-      <div className="flex gap-3 justify-end pt-6 border-t">
-        <Button
-          onClick={onCancel}
-          variant="outline"
-          disabled={isSaving}
-          className="px-6"
-        >
-          <X className="w-4 h-4 mr-2" />
-          Cancel
-        </Button>
-        <Button
-          onClick={handleSave}
-          disabled={isSaving || (hasErrors && !proceedAnyway)}
-          className="px-6 bg-indigo-600 hover:bg-indigo-700 ripple"
-        >
-          <Save className="w-4 h-4 mr-2" />
-          {isSaving ? "Saving..." : "Save Inspection"}
-        </Button>
+      <div className="flex flex-wrap gap-3 justify-between items-center pt-6 border-t">
+        <div>
+          {onDelete && extractedData?.id && formData.status !== "finalized" && (
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => setDeleteConfirmOpen(true)}
+              disabled={isSaving}
+              className="px-4"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete NOI
+            </Button>
+          )}
+        </div>
+        <div className="flex gap-3 justify-end">
+          <Button
+            onClick={onCancel}
+            variant="outline"
+            disabled={isSaving}
+            className="px-6"
+          >
+            <X className="w-4 h-4 mr-2" />
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={isSaving || (hasErrors && !proceedAnyway)}
+            className="px-6 bg-indigo-600 hover:bg-indigo-700 ripple"
+          >
+            <Save className="w-4 h-4 mr-2" />
+            {isSaving ? "Saving..." : "Save Inspection"}
+          </Button>
+        </div>
       </div>
+
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Inspection Notification</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete NOI{" "}
+              <strong>{formData.notification_number || extractedData?.id}</strong>? This removes it from Inspection,
+              unlinks any open Vendor dispatch request, and removes synced notification/IAP items from SmartExpedit.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => {
+                setDeleteConfirmOpen(false);
+                if (onDelete && extractedData?.id) onDelete(extractedData.id);
+              }}
+            >
+              Delete NOI
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Multi-Agency Selection Dialog */}
       <Dialog open={multiAgencyDialogOpen} onOpenChange={setMultiAgencyDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Send to Multiple TPI Agencies</DialogTitle>
+            <DialogDescription>
+              Select one or more TPI agencies to include in the BCC email draft.
+            </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <p className="text-sm text-gray-600 mb-2">

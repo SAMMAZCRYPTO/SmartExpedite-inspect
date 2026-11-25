@@ -29,10 +29,6 @@ export default function Signup() {
                 },
             });
             setSuccess(true);
-            // Refresh page after 2 seconds
-            setTimeout(() => {
-                window.location.reload();
-            }, 2000);
         } catch (err) {
             setError(err.message || 'Failed to create account');
         } finally {
@@ -49,8 +45,11 @@ export default function Signup() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                         </svg>
                     </div>
-                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Account Created!</h2>
-                    <p className="text-gray-600">Redirecting to dashboard...</p>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Registration Submitted</h2>
+                    <p className="text-gray-600 mb-6">Your account is pending administrator approval and role assignment before you can sign in.</p>
+                    <a href="/login">
+                        <Button className="w-full">Back to Sign In</Button>
+                    </a>
                 </div>
             </div>
         );
@@ -99,9 +98,9 @@ export default function Signup() {
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            placeholder="Enter password"
+                            placeholder="Min 10 chars (upper, lower, number, symbol)"
                             required
-                            minLength={6}
+                            minLength={10}
                         />
                     </div>
 

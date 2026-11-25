@@ -14,7 +14,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { X, Upload, FileText, AlertCircle, Loader2, CheckCircle2, Star, Clock, AlertTriangle } from "lucide-react";
+import { X, Upload, FileText, AlertCircle, Loader2, CheckCircle2, Star, Clock, AlertTriangle, ShieldCheck } from "lucide-react";
+import IssueIrcDialog from "./IssueIrcDialog";
 import { toast } from "sonner";
 import { isPast, isFuture, parseISO, startOfDay, isAfter } from "date-fns";
 
@@ -28,6 +29,7 @@ export default function UploadReportsDialog({ open, onClose, inspection, onSucce
   const [testReportFiles, setTestReportFiles] = useState([]);
   const [releaseNoteFiles, setReleaseNoteFiles] = useState([]);
   const [additionalFiles, setAdditionalFiles] = useState([]);
+  const [issueIrcOpen, setIssueIrcOpen] = useState(false);
 
   const [requiredDocs, setRequiredDocs] = useState({
     inspection_report: inspection?.required_documents?.inspection_report ?? true,
@@ -257,25 +259,27 @@ RETURN FORMAT: JSON object with "findings" array. If NO findings, return empty a
 
       const updatedReports = [...existingReports, ...allNewReports];
 
-      // Auto-finalize if any inspection report is uploaded
-      const shouldFinalize = newInspectionReports.length > 0;
+      // Quality Gate: Uploading an Inspection Report transitions status to 'completed'
+      // (Under Inspection Engineer Review / Pending Release). Official finalization goes through /api/v1/issue-irc.
+      const nextStatus = newInspectionReports.length > 0 ? "completed" : inspection.status;
 
-      // Update inspection - only inspection_reports column exists
+      // Update inspection
       await base44.entities.Inspection.update(inspection.id, {
         inspection_reports: updatedReports,
-        ...(shouldFinalize && { status: "finalized" })
+        status: nextStatus
       });
 
       // Show findings summary if any were found
       const totalFindings = extractedFindings.reduce((sum, r) => sum + r.findings.length, 0);
       if (totalFindings > 0) {
-        toast.success(`✓ Reports uploaded! Found ${totalFindings} finding(s) that need attention.`, {
+        toast.success(`✓ Report uploaded (Pending IE Review)! Found ${totalFindings} finding(s) auto-synced to Expediting RAIL.`, {
           duration: 5000,
         });
       } else {
-        toast.success(shouldFinalize
-          ? "✓ Reports uploaded and inspection finalized!"
-          : "✓ Reports uploaded successfully!"
+        toast.success(
+          newReleaseNotes.length > 0
+            ? "✓ Attachments uploaded! Issue official IRC via the Issue IRC dialog to finalize."
+            : "✓ Inspection Report uploaded! Status: Under Inspection Engineer Review (Pending IRC Release)."
         );
       }
 
@@ -390,332 +394,366 @@ RETURN FORMAT: JSON object with "findings" array. If NO findings, return empty a
   );
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Upload Inspection Reports</DialogTitle>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Upload Inspection Reports</DialogTitle>
+          </DialogHeader>
 
-        <div className="space-y-6">
-          {!canUpload && (
-            <Alert className="bg-red-50 border-red-200">
-              <AlertCircle className="h-4 w-4 text-red-600" />
-              <AlertDescription className="text-red-900">
-                <strong>❌ Upload Blocked:</strong> {uploadBlockedReason}
-                {inspection.status === "received" && (
-                  <div className="mt-2">
-                    <p className="text-sm">→ Please assign a TPI agency and inspector to schedule this inspection first.</p>
-                  </div>
-                )}
-                {inspection.start_date && isAfter(startOfDay(parseISO(inspection.start_date)), startOfDay(new Date())) && (
-                  <div className="mt-2">
-                    <p className="text-sm">→ The inspection is scheduled for the future. You can amend the notification date to an earlier date if needed.</p>
-                  </div>
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
+          <div className="space-y-6">
+            {!canUpload && (
+              <Alert className="bg-red-50 border-red-200">
+                <AlertCircle className="h-4 w-4 text-red-600" />
+                <AlertDescription className="text-red-900">
+                  <strong>❌ Upload Blocked:</strong> {uploadBlockedReason}
+                  {inspection.status === "received" && (
+                    <div className="mt-2">
+                      <p className="text-sm">→ Please assign a TPI agency and inspector to schedule this inspection first.</p>
+                    </div>
+                  )}
+                  {inspection.start_date && isAfter(startOfDay(parseISO(inspection.start_date)), startOfDay(new Date())) && (
+                    <div className="mt-2">
+                      <p className="text-sm">→ The inspection is scheduled for the future. You can amend the notification date to an earlier date if needed.</p>
+                    </div>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
 
-          {extractedFindings.length > 0 && (
-            <Alert className="bg-amber-50 border-amber-200">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-              <AlertDescription className="text-amber-900">
-                <strong>⚠️ Findings Detected in Inspection Reports:</strong>
-                <div className="mt-3 space-y-3 max-h-64 overflow-y-auto">
-                  {extractedFindings.map((reportFindings, idx) => (
-                    <div key={idx} className="bg-white rounded-lg p-3 border border-amber-200">
-                      <p className="font-semibold text-amber-900 mb-2 text-sm">
-                        📄 {reportFindings.reportName}
-                      </p>
-                      <div className="space-y-2">
-                        {reportFindings.findings.map((finding, fIdx) => (
-                          <div key={fIdx} className="bg-amber-50 rounded p-2 border border-amber-100">
-                            <div className="flex items-start gap-2 mb-1">
-                              <Badge className={`${getSeverityColor(finding.severity)} text-xs`}>
-                                {finding.type}
-                              </Badge>
-                              {finding.severity && (
-                                <Badge variant="outline" className="text-xs">
-                                  {finding.severity}
+            {extractedFindings.length > 0 && (
+              <Alert className="bg-amber-50 border-amber-200">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <AlertDescription className="text-amber-900">
+                  <strong>⚠️ Findings Detected in Inspection Reports:</strong>
+                  <div className="mt-3 space-y-3 max-h-64 overflow-y-auto">
+                    {extractedFindings.map((reportFindings, idx) => (
+                      <div key={idx} className="bg-white rounded-lg p-3 border border-amber-200">
+                        <p className="font-semibold text-amber-900 mb-2 text-sm">
+                          📄 {reportFindings.reportName}
+                        </p>
+                        <div className="space-y-2">
+                          {reportFindings.findings.map((finding, fIdx) => (
+                            <div key={fIdx} className="bg-amber-50 rounded p-2 border border-amber-100">
+                              <div className="flex items-start gap-2 mb-1">
+                                <Badge className={`${getSeverityColor(finding.severity)} text-xs`}>
+                                  {finding.type}
                                 </Badge>
+                                {finding.severity && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {finding.severity}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-sm text-gray-900">{finding.description}</p>
+                              {finding.item_reference && (
+                                <p className="text-xs text-gray-600 mt-1">
+                                  Reference: {finding.item_reference}
+                                </p>
+                              )}
+                              {finding.status && (
+                                <p className="text-xs text-gray-600">
+                                  Status: {finding.status}
+                                </p>
                               )}
                             </div>
-                            <p className="text-sm text-gray-900">{finding.description}</p>
-                            {finding.item_reference && (
-                              <p className="text-xs text-gray-600 mt-1">
-                                Reference: {finding.item_reference}
-                              </p>
-                            )}
-                            {finding.status && (
-                              <p className="text-xs text-gray-600">
-                                Status: {finding.status}
-                              </p>
-                            )}
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-sm mt-2">
-                  These findings will be saved and accessible in the Actions section for follow-up.
+                    ))}
+                  </div>
+                  <p className="text-sm mt-2">
+                    These findings will be saved and accessible in the Actions section for follow-up.
+                  </p>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <Alert className="bg-indigo-50 border-indigo-200">
+              <AlertCircle className="h-4 w-4 text-indigo-600" />
+              <AlertDescription className="text-indigo-900">
+                <strong>📋 Select Required Documents for Finalization:</strong>
+                <p className="text-sm mt-2 mb-3">
+                  Check which documents are required for this inspection to be finalized. The system will automatically finalize when all required documents are uploaded and the status is "Completed".
                 </p>
+                <div className="space-y-2 mt-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={requiredDocs.inspection_report}
+                      onCheckedChange={(checked) => setRequiredDocs(prev => ({ ...prev, inspection_report: checked }))}
+                    />
+                    <span className="text-sm font-medium">Inspection Report (Required)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={requiredDocs.test_reports}
+                      onCheckedChange={(checked) => setRequiredDocs(prev => ({ ...prev, test_reports: checked }))}
+                    />
+                    <span className="text-sm font-medium">Test Reports / MTCs</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={requiredDocs.release_note}
+                      onCheckedChange={(checked) => setRequiredDocs(prev => ({ ...prev, release_note: checked }))}
+                    />
+                    <span className="text-sm font-medium">IRC / Release Note</span>
+                  </label>
+                </div>
               </AlertDescription>
             </Alert>
-          )}
 
-          <Alert className="bg-indigo-50 border-indigo-200">
-            <AlertCircle className="h-4 w-4 text-indigo-600" />
-            <AlertDescription className="text-indigo-900">
-              <strong>📋 Select Required Documents for Finalization:</strong>
-              <p className="text-sm mt-2 mb-3">
-                Check which documents are required for this inspection to be finalized. The system will automatically finalize when all required documents are uploaded and the status is "Completed".
+            <Alert className="bg-blue-50 border-blue-200">
+              <AlertCircle className="h-4 w-4 text-blue-600" />
+              <AlertDescription className="text-blue-900">
+                <strong>Multiple Reports Supported:</strong> You can upload flash reports, interim reports, and a final report.
+                <br />
+                <strong className="inline-block mt-1">⭐ "Final" checkbox:</strong> Only mark as final if you want the inspection to auto-finalize. You can upload reports without marking as final.
+                <br />
+                <strong className="inline-block mt-1">🔍 AI Analysis:</strong> Inspection reports will be automatically analyzed for non-conformances and findings.
+              </AlertDescription>
+            </Alert>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-base font-semibold flex items-center gap-2">
+                  Inspection Reports {requiredDocs.inspection_report && <span className="text-red-600">*</span>}
+                  {requiredDocs.inspection_report && (
+                    <Badge className="bg-red-100 text-red-800 text-xs">Required</Badge>
+                  )}
+                </Label>
+                <Input
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  multiple
+                  onChange={(e) => handleFileChange(e, setInspectionReportFiles, "Flash")}
+                  className="hidden"
+                  id="inspection-reports"
+                  disabled={!canUpload}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById('inspection-reports').click()}
+                  disabled={!canUpload}
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Add Files
+                </Button>
+              </div>
+              <p className="text-sm text-gray-600">
+                Upload flash, interim, or final inspection reports. Optional: Mark as 'Final' when ready to finalize.
               </p>
-              <div className="space-y-2 mt-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <Checkbox
-                    checked={requiredDocs.inspection_report}
-                    onCheckedChange={(checked) => setRequiredDocs(prev => ({ ...prev, inspection_report: checked }))}
-                  />
-                  <span className="text-sm font-medium">Inspection Report (Required)</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <Checkbox
-                    checked={requiredDocs.test_reports}
-                    onCheckedChange={(checked) => setRequiredDocs(prev => ({ ...prev, test_reports: checked }))}
-                  />
-                  <span className="text-sm font-medium">Test Reports / MTCs</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <Checkbox
-                    checked={requiredDocs.release_note}
-                    onCheckedChange={(checked) => setRequiredDocs(prev => ({ ...prev, release_note: checked }))}
-                  />
-                  <span className="text-sm font-medium">IRC / Release Note</span>
-                </label>
-              </div>
-            </AlertDescription>
-          </Alert>
-
-          <Alert className="bg-blue-50 border-blue-200">
-            <AlertCircle className="h-4 w-4 text-blue-600" />
-            <AlertDescription className="text-blue-900">
-              <strong>Multiple Reports Supported:</strong> You can upload flash reports, interim reports, and a final report.
-              <br />
-              <strong className="inline-block mt-1">⭐ "Final" checkbox:</strong> Only mark as final if you want the inspection to auto-finalize. You can upload reports without marking as final.
-              <br />
-              <strong className="inline-block mt-1">🔍 AI Analysis:</strong> Inspection reports will be automatically analyzed for non-conformances and findings.
-            </AlertDescription>
-          </Alert>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label className="text-base font-semibold flex items-center gap-2">
-                Inspection Reports {requiredDocs.inspection_report && <span className="text-red-600">*</span>}
-                {requiredDocs.inspection_report && (
-                  <Badge className="bg-red-100 text-red-800 text-xs">Required</Badge>
-                )}
-              </Label>
-              <Input
-                type="file"
-                accept=".pdf,.png,.jpg,.jpeg"
-                multiple
-                onChange={(e) => handleFileChange(e, setInspectionReportFiles, "Flash")}
-                className="hidden"
-                id="inspection-reports"
-                disabled={!canUpload}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => document.getElementById('inspection-reports').click()}
-                disabled={!canUpload}
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                Add Files
-              </Button>
-            </div>
-            <p className="text-sm text-gray-600">
-              Upload flash, interim, or final inspection reports. Optional: Mark as 'Final' when ready to finalize.
-            </p>
-            {inspectionReportFiles.length > 0 && (
-              <FileList
-                files={inspectionReportFiles}
-                setter={setInspectionReportFiles}
-                allowFinal={true}
-                allowDate={true}
-                label="Inspection Report"
-              />
-            )}
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label className="text-base font-semibold flex items-center gap-2">
-                Test Reports / MTCs {requiredDocs.test_reports && <span className="text-red-600">*</span>}
-                {requiredDocs.test_reports ? (
-                  <Badge className="bg-red-100 text-red-800 text-xs">Required</Badge>
-                ) : (
-                  <Badge className="bg-gray-100 text-gray-600 text-xs">Optional</Badge>
-                )}
-              </Label>
-              <Input
-                type="file"
-                accept=".pdf,.png,.jpg,.jpeg"
-                multiple
-                onChange={(e) => handleFileChange(e, setTestReportFiles)}
-                className="hidden"
-                id="test-reports"
-                disabled={!canUpload}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => document.getElementById('test-reports').click()}
-                disabled={!canUpload}
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                Add Files
-              </Button>
-            </div>
-            <p className="text-sm text-gray-600">
-              Upload test records and Material Test Certificates (MTCs).
-            </p>
-            {testReportFiles.length > 0 && (
-              <FileList
-                files={testReportFiles}
-                setter={setTestReportFiles}
-                label="Test Report"
-              />
-            )}
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label className="text-base font-semibold flex items-center gap-2">
-                IRC / Release Notes {requiredDocs.release_note && <span className="text-red-600">*</span>}
-                {requiredDocs.release_note ? (
-                  <Badge className="bg-red-100 text-red-800 text-xs">Required</Badge>
-                ) : (
-                  <Badge className="bg-gray-100 text-gray-600 text-xs">Optional</Badge>
-                )}
-              </Label>
-              <Input
-                type="file"
-                accept=".pdf,.png,.jpg,.jpeg"
-                multiple
-                onChange={(e) => handleFileChange(e, setReleaseNoteFiles)}
-                className="hidden"
-                id="release-notes"
-                disabled={!canUpload}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => document.getElementById('release-notes').click()}
-                disabled={!canUpload}
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                Add Files
-              </Button>
-            </div>
-            <p className="text-sm text-gray-600">
-              {requiredDocs.release_note
-                ? "Required for this inspection. Mark one as 'Final IRC/Release Note' when ready."
-                : "Optional IRC/release notes for this inspection."}
-            </p>
-            {releaseNoteFiles.length > 0 && (
-              <FileList
-                files={releaseNoteFiles}
-                setter={setReleaseNoteFiles}
-                allowFinal={requiredDocs.release_note}
-                label="Release Note"
-              />
-            )}
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label className="text-base font-semibold">
-                Additional Documents
-              </Label>
-              <Input
-                type="file"
-                accept=".pdf,.png,.jpg,.jpeg"
-                multiple
-                onChange={(e) => handleFileChange(e, setAdditionalFiles)}
-                className="hidden"
-                id="additional-files"
-                disabled={!canUpload}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => document.getElementById('additional-files').click()}
-                disabled={!canUpload}
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                Add Files
-              </Button>
-            </div>
-            <p className="text-sm text-gray-600">
-              Optional supporting documents, photos, or other files.
-            </p>
-            {additionalFiles.length > 0 && (
-              <FileList
-                files={additionalFiles}
-                setter={setAdditionalFiles}
-                label="Document"
-              />
-            )}
-          </div>
-
-          {uploading && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
-                <span className="text-sm font-medium">
-                  {processingFindings ? "Analyzing inspection reports for findings..." : "Uploading reports..."}
-                </span>
-              </div>
-              <Progress value={progress} className="h-2" />
-              <p className="text-xs text-gray-600">{Math.round(progress)}% complete</p>
-            </div>
-          )}
-
-          <div className="flex gap-3 justify-end pt-4 border-t">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleClose}
-              disabled={uploading}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleUpload}
-              disabled={uploading || !canUpload}
-              className="bg-indigo-600 hover:bg-indigo-700"
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  {processingFindings ? "Analyzing..." : "Uploading..."}
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4 mr-2" />
-                  Upload Reports
-                </>
+              {inspectionReportFiles.length > 0 && (
+                <FileList
+                  files={inspectionReportFiles}
+                  setter={setInspectionReportFiles}
+                  allowFinal={true}
+                  allowDate={true}
+                  label="Inspection Report"
+                />
               )}
-            </Button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-base font-semibold flex items-center gap-2">
+                  Test Reports / MTCs {requiredDocs.test_reports && <span className="text-red-600">*</span>}
+                  {requiredDocs.test_reports ? (
+                    <Badge className="bg-red-100 text-red-800 text-xs">Required</Badge>
+                  ) : (
+                    <Badge className="bg-gray-100 text-gray-600 text-xs">Optional</Badge>
+                  )}
+                </Label>
+                <Input
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  multiple
+                  onChange={(e) => handleFileChange(e, setTestReportFiles)}
+                  className="hidden"
+                  id="test-reports"
+                  disabled={!canUpload}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById('test-reports').click()}
+                  disabled={!canUpload}
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Add Files
+                </Button>
+              </div>
+              <p className="text-sm text-gray-600">
+                Upload test records and Material Test Certificates (MTCs).
+              </p>
+              {testReportFiles.length > 0 && (
+                <FileList
+                  files={testReportFiles}
+                  setter={setTestReportFiles}
+                  label="Test Report"
+                />
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-base font-semibold flex items-center gap-2">
+                  IRC / Release Notes {requiredDocs.release_note && <span className="text-red-600">*</span>}
+                  {requiredDocs.release_note ? (
+                    <Badge className="bg-red-100 text-red-800 text-xs">Required</Badge>
+                  ) : (
+                    <Badge className="bg-gray-100 text-gray-600 text-xs">Optional</Badge>
+                  )}
+                </Label>
+                <Input
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  multiple
+                  onChange={(e) => handleFileChange(e, setReleaseNoteFiles)}
+                  className="hidden"
+                  id="release-notes"
+                  disabled={!canUpload}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById('release-notes').click()}
+                  disabled={!canUpload}
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Add Files
+                </Button>
+              </div>
+              <p className="text-sm text-gray-600">
+                {requiredDocs.release_note
+                  ? "Required for this inspection. Mark one as 'Final IRC/Release Note' when ready."
+                  : "Optional IRC/release notes for this inspection."}
+              </p>
+              {/* Itemized Form-Based IRC Reconciler Option */}
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                <div>
+                  <p className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    Itemized Release with PO BOM Reconciler
+                  </p>
+                  <p className="text-[11px] text-emerald-800 mt-0.5">
+                    Pre-select offered NOI items, add revised PO items on shop floor, or reconcile manual lines.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => setIssueIrcOpen(true)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold h-8 shrink-0 shadow-sm"
+                >
+                  Open IRC Reconciler
+                </Button>
+              </div>
+
+              {releaseNoteFiles.length > 0 && (
+                <FileList
+                  files={releaseNoteFiles}
+                  setter={setReleaseNoteFiles}
+                  allowFinal={requiredDocs.release_note}
+                  label="Release Note"
+                />
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-base font-semibold">
+                  Additional Documents
+                </Label>
+                <Input
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  multiple
+                  onChange={(e) => handleFileChange(e, setAdditionalFiles)}
+                  className="hidden"
+                  id="additional-files"
+                  disabled={!canUpload}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById('additional-files').click()}
+                  disabled={!canUpload}
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Add Files
+                </Button>
+              </div>
+              <p className="text-sm text-gray-600">
+                Optional supporting documents, photos, or other files.
+              </p>
+              {additionalFiles.length > 0 && (
+                <FileList
+                  files={additionalFiles}
+                  setter={setAdditionalFiles}
+                  label="Document"
+                />
+              )}
+            </div>
+
+            {uploading && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                  <span className="text-sm font-medium">
+                    {processingFindings ? "Analyzing inspection reports for findings..." : "Uploading reports..."}
+                  </span>
+                </div>
+                <Progress value={progress} className="h-2" />
+                <p className="text-xs text-gray-600">{Math.round(progress)}% complete</p>
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-end pt-4 border-t">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleClose}
+                disabled={uploading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleUpload}
+                disabled={uploading || !canUpload}
+                className="bg-indigo-600 hover:bg-indigo-700"
+              >
+                {uploading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {processingFindings ? "Analyzing..." : "Uploading..."}
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 mr-2" />
+                    Upload Reports
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+
+      <IssueIrcDialog
+        open={issueIrcOpen}
+        onClose={() => setIssueIrcOpen(false)}
+        inspection={inspection}
+        currentUser={currentUser}
+        onSuccess={() => {
+          if (onSuccess) onSuccess();
+          onClose();
+        }}
+      />
+    </>
   );
 }

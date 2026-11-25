@@ -1,0 +1,1510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SmartExpedit - Expediting Detail</title>
+<!-- ==========================================================================
+     EXPEDITING DETAIL — the expeditor's workspace on one order (v33, M9).
+
+     Opened from Mr. Huzaifa's queue once he has assigned the order. The work,
+     in the expeditor's own order:
+       MR Study          — the ITR and SDR read out of the MR (contents ->
+                           ATTACH-VI / VII -> pages -> tables), checked by eye
+       Introduction Letter (top bar) — generated from the order, sent on the
+                           portal; the vendor answers each point there
+       Document Control  — the Vendor Data Register: created from the SDR,
+                           edited by both sides, every change marked,
+                           .xlsx out and back in
+       Schedule          — the key tab: activity schedule (minimum rows locked,
+                           baseline frozen once accepted), itemized per PO line,
+                           sub-orders with float, issues as Z003 revisions
+       Manufacturing · Shipment & Delivery · Closeout · Follow-up Log
+
+     "View as": NPCC (the expeditor) or the Vendor portal — the same record,
+     the vendor sees Letter, Document Register and Schedule.
+     No CDN; every class is ep- prefixed.
+     ========================================================================== -->
+<style>
+  html { height:100%; } body { min-height:100%; margin:0; }
+  body { font-family:'Segoe UI', Arial, sans-serif; color:#1e293b; font-size:13px; background:#f1f5f9; }
+  .tabnum { font-variant-numeric: tabular-nums; }
+  [hidden] { display:none !important; }
+
+  .ep-btn { padding:7px 14px; border-radius:7px; font-size:12.5px; font-weight:600; cursor:pointer;
+    border:1px solid transparent; display:inline-flex; align-items:center; gap:6px; font-family:inherit; white-space:nowrap; }
+  .ep-btn.primary { background:#0d9488; color:#fff; }
+  .ep-btn.primary:hover { background:#0f766e; }
+  .ep-btn.secondary { background:#fff; color:#334155; border-color:#cbd5e1; }
+  .ep-btn.secondary:hover { background:#f1f5f9; }
+  .ep-btn.danger { background:#fff; color:#be123c; border-color:#fecdd3; }
+  .ep-btn.sm { padding:5px 11px; font-size:11.5px; }
+  .ep-btn.xs { padding:3px 8px; font-size:10.5px; border-radius:6px; }
+  .ep-btn:disabled { opacity:.45; cursor:not-allowed; }
+
+  .ep-toolbar { display:flex; align-items:center; gap:8px; padding:11px 24px;
+    background:#fff; border-bottom:1px solid #e2e8f0; flex-wrap:wrap; }
+  .ep-seg { display:inline-flex; border:1px solid #cbd5e1; border-radius:8px; overflow:hidden; }
+  .ep-seg button { border:0; background:#fff; padding:6px 12px; font:600 12px 'Segoe UI',Arial,sans-serif; color:#475569; cursor:pointer; }
+  .ep-seg button.on { background:#1e293b; color:#fff; }
+  .ep-seg-l { font-size:11px; color:#94a3b8; font-weight:700; margin-right:4px; }
+  .ep-portal { background:#134e4a; color:#ccfbf1; padding:9px 24px; font-size:12px; display:flex; gap:10px; align-items:center; }
+  .ep-portal b { color:#fff; }
+  .ep-head { padding:14px 24px 0; }
+  .ep-head h2 { margin:0; font-size:19px; font-weight:700; }
+  .ep-head .sub { font-size:11.5px; color:#94a3b8; margin-top:3px; }
+
+  .ep-pill { display:inline-flex; align-items:center; gap:6px; padding:3px 11px; border-radius:999px;
+    font-size:11px; font-weight:700; background:#e2e8f0; color:#475569; white-space:nowrap; }
+  .ep-pill.teal { background:#ccfbf1; color:#0f766e; }
+  .ep-pill.warn { background:#fef3c7; color:#92400e; }
+  .ep-pill.rose { background:#ffe4e6; color:#9f1239; }
+  .ep-pill.slate { background:#e2e8f0; color:#475569; }
+  .ep-pill.dark { background:#1e293b; color:#fff; }
+  .ep-pill.sm { font-size:9.5px; padding:2px 8px; }
+
+  .ep-tabs { display:flex; gap:2px; padding:12px 24px 0; border-bottom:1px solid #e2e8f0; overflow-x:auto; }
+  .ep-tab { padding:10px 15px; font-size:12.5px; font-weight:600; color:#64748b;
+    border-bottom:2.5px solid transparent; cursor:pointer; white-space:nowrap; }
+  .ep-tab:hover { color:#334155; }
+  .ep-tab.active { color:#0f766e; border-bottom-color:#0d9488; }
+  .ep-tab .n { font-size:10px; background:#e2e8f0; color:#475569; border-radius:999px; padding:1px 6px; margin-left:4px; }
+  .ep-tab .n.rose { background:#ffe4e6; color:#9f1239; }
+
+  .ep-wrap { padding:16px 24px 40px; }
+  .ep-card { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:16px 18px; margin-bottom:16px; }
+  .ep-card.flush { padding:0; overflow:hidden; }
+  .ep-card-title { display:flex; align-items:center; justify-content:space-between; gap:12px;
+    font-size:13px; font-weight:700; margin-bottom:12px; flex-wrap:wrap; }
+  .ep-card.flush > .ep-card-title { padding:14px 16px 10px; margin-bottom:0; }
+  .ep-note { background:#f0fdfa; border:1px solid #99f6e4; border-left:3px solid #0d9488;
+    border-radius:8px; padding:11px 14px; font-size:11.5px; color:#0f766e; line-height:1.65; margin-bottom:14px; }
+  .ep-note.warn { background:#fffbeb; border-color:#fde68a; border-left-color:#f59e0b; color:#92400e; }
+  .ep-note.rose { background:#fff1f2; border-color:#fecdd3; border-left-color:#e11d48; color:#9f1239; }
+  .ep-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .ep-sp { flex:1; }
+
+  .ep-fields { display:grid; grid-template-columns:repeat(4, 1fr); gap:1px; background:#e2e8f0;
+    border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; margin-bottom:14px; }
+  .ep-f { background:#fff; padding:11px 13px; min-width:0; }
+  .ep-f .k { font-size:9.5px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; color:#94a3b8; }
+  .ep-f .v { font-size:13px; font-weight:600; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ep-f .v.wrap { white-space:normal; }
+  .ep-f.src { background:#f8fafc; }
+
+  .ep-kpis { display:grid; grid-template-columns:repeat(5, 1fr); gap:10px; margin-bottom:14px; }
+  .ep-kpi { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:11px 13px; }
+  .ep-kpi .k { font-size:9.5px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; color:#94a3b8; }
+  .ep-kpi .v { font-size:20px; font-weight:800; margin-top:3px; }
+  .ep-kpi .s { font-size:10.5px; color:#64748b; margin-top:2px; }
+
+  .ep-in, .ep-sel, .ep-ta { width:100%; box-sizing:border-box; padding:7px 9px; border:1px solid #cbd5e1; border-radius:7px;
+    font:13px 'Segoe UI',Arial,sans-serif; color:#1e293b; background:#fff; margin-top:4px; }
+  .ep-in:focus, .ep-sel:focus, .ep-ta:focus { outline:none; border-color:#0d9488; box-shadow:0 0 0 2px #ccfbf1; }
+  .ep-ta { resize:vertical; min-height:60px; }
+  .ep-lbl { font-size:10px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; color:#94a3b8; }
+
+  table.ep-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .ep-table th { text-align:left; padding:8px 9px; font-size:10.5px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
+    color:#64748b; background:#f8fafc; border-bottom:1px solid #e2e8f0; white-space:nowrap; }
+  .ep-table td { padding:7px 9px; border-bottom:1px solid #f1f5f9; vertical-align:top; }
+  .ep-table tr:hover td { background:#fafcff; }
+  .ep-table .num { text-align:right; }
+  .ep-table .grp td { background:#f8fafc; font-weight:700; color:#475569; font-size:11px; }
+
+  /* the grid — Excel-like */
+  .ep-gridwrap { overflow:auto; max-height:640px; border-top:1px solid #e2e8f0; }
+  table.ep-grid { border-collapse:collapse; font-size:11.5px; min-width:100%; }
+  .ep-grid th { position:sticky; top:0; z-index:2; background:#f1f5f9; border:1px solid #e2e8f0; padding:6px 7px;
+    font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.03em; color:#475569; text-align:left; white-space:nowrap; }
+  .ep-grid th.x { background:#fef9c3; }
+  .ep-grid td { border:1px solid #e2e8f0; padding:0; vertical-align:middle; background:#fff; height:28px; }
+  .ep-grid td.ro { background:#f8fafc; padding:4px 7px; color:#334155; white-space:nowrap; }
+  .ep-grid td.t { padding:4px 7px; }
+  .ep-grid input, .ep-grid select { width:100%; box-sizing:border-box; border:0; background:transparent; padding:5px 7px;
+    font:11.5px 'Segoe UI',Arial,sans-serif; color:#1e293b; height:28px; }
+  .ep-grid input:focus, .ep-grid select:focus { outline:2px solid #0d9488; outline-offset:-2px; background:#f0fdfa; }
+  .ep-grid input[readonly] { color:#64748b; }
+  .ep-grid td.mk-n { box-shadow:inset 3px 0 0 #0d9488; background:#f0fdfa; }
+  .ep-grid td.mk-v { box-shadow:inset 3px 0 0 #f59e0b; background:#fffbeb; }
+  .ep-grid tr.del td { background:#f8fafc !important; color:#94a3b8; text-decoration:line-through; }
+  .ep-grid tr.del td.act { text-decoration:none; }
+  .ep-grid tr.na td { background:#f8fafc; color:#94a3b8; }
+  .ep-grid tr.na td input { color:#94a3b8; text-decoration:line-through; }
+  .ep-grid tr.itp td:first-child { box-shadow:inset 3px 0 0 #7c3aed; }
+  .ep-grid td.act { white-space:nowrap; padding:2px 5px; background:#fff; }
+  .ep-grid .lock { color:#94a3b8; font-size:10px; margin-left:4px; }
+  .ep-grid td.bad input { color:#be123c; font-weight:700; }
+  .ep-ico { border:0; background:none; cursor:pointer; color:#64748b; font-size:13px; padding:2px 4px; border-radius:5px; }
+  .ep-ico:hover { background:#f1f5f9; color:#0f766e; }
+  .ep-chip { display:inline-block; font-size:9.5px; font-weight:800; padding:1px 6px; border-radius:5px; margin-left:4px; }
+  .ep-chip.H { background:#ede9fe; color:#6d28d9; } .ep-chip.W { background:#e0f2fe; color:#0369a1; }
+  .ep-chip.min { background:#f1f5f9; color:#64748b; }
+  .ep-chip.ven { background:#fef3c7; color:#92400e; } .ep-chip.npc { background:#ccfbf1; color:#0f766e; }
+
+  .ep-bar { position:relative; height:16px; min-width:160px; }
+  .ep-bar i { position:absolute; height:6px; border-radius:3px; }
+  .ep-bar i.b { top:2px; background:#cbd5e1; } .ep-bar i.f { top:9px; background:#0d9488; } .ep-bar i.f.late { background:#e11d48; }
+  .ep-bar i.today { top:0; height:16px; width:1px; background:#f59e0b; border-radius:0; }
+
+  .ep-issues { margin:0; padding:0; list-style:none; }
+  .ep-issues li { padding:6px 0 6px 18px; border-bottom:1px solid #f1f5f9; font-size:12px; position:relative; }
+  .ep-issues li::before { content:''; position:absolute; left:4px; top:11px; width:7px; height:7px; border-radius:9px; background:#f59e0b; }
+  .ep-issues li.rose::before { background:#e11d48; }
+
+  /* stage rail */
+  .ep-rail { display:flex; gap:0; overflow-x:auto; padding:14px 0 4px; }
+  .ep-step { flex:1; min-width:84px; text-align:center; position:relative; padding:0 4px; }
+  .ep-step .dot { width:26px; height:26px; border-radius:999px; background:#e2e8f0; color:#64748b; display:flex;
+    align-items:center; justify-content:center; font-size:11px; font-weight:800; margin:0 auto; position:relative; z-index:1; }
+  .ep-step.done .dot { background:#0d9488; color:#fff; }
+  .ep-step.now .dot { background:#0f766e; color:#fff; box-shadow:0 0 0 4px #ccfbf1; }
+  .ep-step::before { content:''; position:absolute; top:13px; left:-50%; width:100%; height:2px; background:#e2e8f0; z-index:0; }
+  .ep-step:first-child::before { display:none; }
+  .ep-step.done::before, .ep-step.now::before { background:#0d9488; }
+  .ep-step .lb { font-size:10px; font-weight:700; color:#64748b; margin-top:6px; line-height:1.3; }
+  .ep-step.done .lb, .ep-step.now .lb { color:#0f766e; }
+  .ep-step .dt { font-size:9.5px; color:#94a3b8; margin-top:1px; }
+
+  /* MR study */
+  .ep-flow { display:flex; gap:0; align-items:stretch; margin-bottom:14px; flex-wrap:wrap; }
+  .ep-flow .s { flex:1; min-width:160px; background:#fff; border:1px solid #e2e8f0; padding:10px 12px; position:relative; }
+  .ep-flow .s + .s { border-left:0; }
+  .ep-flow .s:first-child { border-radius:8px 0 0 8px; } .ep-flow .s:last-child { border-radius:0 8px 8px 0; }
+  .ep-flow .s .k { font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:#94a3b8; }
+  .ep-flow .s .v { font-size:12.5px; font-weight:700; margin-top:3px; }
+  .ep-flow .s .d { font-size:11px; color:#64748b; margin-top:2px; }
+  .ep-thumbs { display:flex; gap:10px; flex-wrap:wrap; }
+  .ep-thumb { width:118px; cursor:pointer; text-align:center; }
+  .ep-thumb img { width:118px; height:166px; object-fit:cover; object-position:top; border:1px solid #cbd5e1; border-radius:5px; background:#fff; display:block; }
+  .ep-thumb:hover img { border-color:#0d9488; box-shadow:0 0 0 2px #ccfbf1; }
+  .ep-thumb span { font-size:10.5px; color:#475569; font-weight:600; display:block; margin-top:4px; }
+  .ep-att { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+  .ep-att div { border:1px solid #e2e8f0; border-radius:7px; padding:7px 9px; font-size:11px; background:#fff; }
+  .ep-att div.hit { border-color:#0d9488; background:#f0fdfa; }
+  .ep-att div.na { color:#94a3b8; }
+  .ep-att b { display:block; font-size:10px; color:#0f766e; }
+  td.lv { background:#f0fdfa; font-weight:700; }
+  .ep-prog { font-family:Consolas,monospace; font-size:11.5px; background:#0f172a; color:#a7f3d0; border-radius:8px; padding:10px 12px;
+    max-height:160px; overflow:auto; white-space:pre-wrap; }
+
+  /* modal */
+  .ep-modal-bg { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:50; display:flex;
+    align-items:flex-start; justify-content:center; padding:40px 16px; overflow:auto; }
+  .ep-modal { background:#fff; border-radius:12px; width:100%; max-width:560px; overflow:hidden; box-shadow:0 24px 60px rgba(15,23,42,.25); }
+  .ep-modal.wide { max-width:860px; } .ep-modal.xwide { max-width:1100px; }
+  .ep-modal h3 { margin:0; padding:16px 20px; font-size:15px; border-bottom:1px solid #e2e8f0; }
+  .ep-modal .body { padding:18px 20px; max-height:72vh; overflow:auto; }
+  .ep-modal .foot { padding:14px 20px; border-top:1px solid #e2e8f0; display:flex; justify-content:flex-end; gap:8px; background:#f8fafc; flex-wrap:wrap; }
+
+  .ep-sub { font-size:11.5px; color:#64748b; line-height:1.6; }
+  .ep-modelled { display:inline-block; font-size:10px; font-weight:800; letter-spacing:.03em; padding:2px 7px; border-radius:999px; background:#fef3c7; color:#92400e; }
+  .ep-empty { text-align:center; color:#94a3b8; padding:34px; }
+  .ep-empty .big { font-weight:700; color:#64748b; margin-bottom:6px; font-size:14px; }
+  .ep-letter { border:1px solid #e2e8f0; border-radius:8px; padding:16px 18px; font-size:12.5px; line-height:1.6; background:#fff; }
+  .ep-letter table { border-collapse:collapse; margin:8px 0 12px; }
+  .ep-letter td { border:1px solid #475569; padding:3px 9px; font-size:12px; }
+  .ep-letter ol { padding-left:20px; } .ep-letter li { margin-bottom:6px; }
+  .ep-reply { margin-top:6px; padding:7px 10px; border-radius:7px; background:#f0fdfa; border:1px solid #99f6e4; font-size:11.5px; color:#0f766e; }
+  .ep-reply.open { background:#fffbeb; border-color:#fde68a; color:#92400e; }
+  .ep-toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#1e293b; color:#fff; padding:9px 16px;
+    border-radius:8px; font-size:12.5px; z-index:60; box-shadow:0 10px 30px rgba(15,23,42,.3); }
+  .ep-subtabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+  .ep-subtabs button { border:1px solid #cbd5e1; background:#fff; border-radius:999px; padding:6px 13px; font:600 12px 'Segoe UI',Arial,sans-serif; color:#475569; cursor:pointer; }
+  .ep-subtabs button.on { background:#0d9488; border-color:#0d9488; color:#fff; }
+  .ep-ms { font-size:10.5px; line-height:1.25; padding:3px 6px; cursor:pointer; min-width:74px; }
+  .ep-ms .a { color:#047857; font-weight:700; } .ep-ms .f { color:#b45309; font-weight:600; } .ep-ms .p { color:#64748b; }
+  .ep-ms:hover { background:#f0fdfa; }
+</style>
+</head>
+<body>
+
+<div class="ep-portal" id="portal-band" hidden></div>
+<div class="ep-toolbar">
+  <button class="ep-btn secondary" id="back">&larr; Back</button>
+  <button class="ep-btn secondary" id="letter-btn">Introduction Letter</button>
+  <button class="ep-btn secondary" id="log-btn">Change Log</button>
+  <span class="ep-sp"></span>
+  <span class="ep-seg-l">View as</span>
+  <span class="ep-seg" id="view-seg"><button data-view="npcc" class="on" id="view-npcc">NPCC</button><button data-view="vendor" id="view-vendor">Vendor portal</button></span>
+  <span id="stage-pill" class="ep-pill teal"></span>
+</div>
+
+<div class="ep-head">
+  <h2 id="title"></h2>
+  <div class="sub" id="sub"></div>
+</div>
+
+<div class="ep-wrap" style="padding-bottom:6px;" id="rail-wrap">
+  <div class="ep-card" style="padding:6px 18px 10px;margin-bottom:6px;">
+    <div class="ep-rail" id="rail"></div>
+  </div>
+</div>
+
+<div class="ep-tabs" id="tabs"></div>
+
+<div class="ep-wrap" id="content"></div>
+
+<!-- generic modal shell -->
+<div class="ep-modal-bg" id="modal-bg" hidden>
+  <div class="ep-modal" id="modal-box">
+    <h3 id="modal-title"></h3>
+    <div class="body" id="modal-body"></div>
+    <div class="foot" id="modal-foot">
+      <button class="ep-btn secondary" id="modal-cancel">Cancel</button>
+      <button class="ep-btn primary" id="modal-ok">OK</button>
+    </div>
+  </div>
+</div>
+<div class="ep-toast" id="toast" hidden></div>
+<input type="file" id="file-xlsx" accept=".xlsx" hidden>
+<input type="file" id="file-pdf" accept=".pdf" hidden>
+
+<script src="ep_items_data.js"></script>
+<script src="ep_mr_data.js"></script>
+<script src="ep_sdrl_master.js"></script>
+<script src="ep_expediting_data.js"></script>
+<script src="xlsx_mini.js"></script>
+<script src="ep_xlsx_read.js"></script>
+<script src="ep_mr_reader.js"></script>
+<script src="ep_mr_74259.js"></script>
+<script src="ep_exp_work.js"></script>
+<script src="ep_pdf_lib.js"></script>
+<script>
+/* =========================================================================
+   EXPEDITING DETAIL — one order, the expeditor's workspace
+   ========================================================================= */
+var $ = function (id) { return document.getElementById(id); };
+var PO = '', REC = null, TAB = 'head', VIEW = 'npcc', SUB = { sched:'act' };
+var MODAL_OK = null, ITEM_PAGE = 0, ITEM_SEL = {};
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  var d = new Date(String(iso).length === 10 ? iso + 'T00:00:00' : iso); if (isNaN(d)) return iso;
+  var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return String(d.getDate()).padStart(2,'0') + '-' + M[d.getMonth()] + '-' + d.getFullYear();
+}
+function fmtDT(iso) {
+  if (!iso) return '';
+  var d = new Date(iso); if (isNaN(d)) return iso;
+  return fmtDate(iso) + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+function money(v) { return '$' + Number(v || 0).toLocaleString(undefined, {maximumFractionDigits:0}); }
+function n(v) { return Number(v || 0).toLocaleString(); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function today() { return epXToday(); }
+function qs(k) { return new URLSearchParams(window.location.search).get(k) || ''; }
+function toast(t) { var el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(function () { el.hidden = true; }, 2600); }
+
+/* who is acting: the assigned expeditor (NPCC) or the vendor on the portal */
+function WHO() { return VIEW === 'vendor' ? (REC.supplierShort || 'Vendor') + ' (portal)' : (REC.assignedTo || EP_EXP_MANAGER); }
+function SIDE() { return VIEW === 'vendor' ? 'Vendor' : 'NPCC'; }
+
+/* the record is edited in memory and written back as a whole —
+   the previous save() wrote a fresh reload, which threw edits away */
+function loadRec() { REC = epExpFind(PO); }
+function saveRec() {
+  var list = epExpLoad();
+  var i = list.findIndex(function (r) { return r.po === REC.po; });
+  if (i >= 0) list[i] = REC; else list.push(REC);
+  epExpSave(list);
+}
+function setStage(key) {
+  if (epExpStageIndex(key) > epExpStageIndex(REC.stage)) REC.stage = key;
+}
+function addLog(txt) { (REC.log = REC.log || []).push({ on:new Date().toISOString(), by:WHO(), txt:txt }); }
+
+/* ------------------------------------------------------------ THE RAIL */
+function rail() {
+  var reg = (REC.reg && REC.reg.rows) || [];
+  var firstIn = reg.filter(function (r) { return !r.deleted && r.actual; }).map(function (r) { return r.actual; }).sort()[0] || '';
+  var marks = [
+    { key:'issued',    d: REC.issuedOn,  lb:'Issued' },
+    { key:'ack',       d: REC.ackDate,   lb:'Acknowledged' },
+    { key:'docsOut',   d: REC.kickoffOn, lb:'Kickoff' },
+    { key:'docsIn',    d: firstIn,       lb:'Docs In' },
+    { key:'pim',       d: (REC.mfg||{}).pimOn || '', lb:'PIM' },
+    { key:'fab',       d: (REC.mfg||{}).fabStart || '', lb:'Fabrication' },
+    { key:'insp',      d: (REC.mfg||{}).extInsp || '', lb:'Inspection' },
+    { key:'release',   d: (REC.mfg||{}).irn || '', lb:'IRN' },
+    { key:'shipped',   d: (REC.ship||{}).etd || '', lb:'Shipped' },
+    { key:'delivered', d: (REC.ship||{}).mrvOn || '', lb:'MRV' },
+    { key:'mrbSub',    d: (REC.close||{}).mrbSubOn || '', lb:'MRB Sub' },
+    { key:'closed',    d: (REC.close||{}).mrbApprOn || '', lb:'Closed' },
+  ];
+  var curIx = epExpStageIndex(REC.stage);
+  var railIx = function (k) { return { issued:0, ack:1, docsOut:2, docsIn:3, docsOk:3, pim:4, fab:5, insp:6, release:7, shipped:8, delivered:9, mrbSub:10, closed:11 }[k]; };
+  var at = railIx(REC.stage);
+  $('rail').innerHTML = marks.map(function (m, i) {
+    var cls = i < at ? 'done' : i === at ? 'now' : '';
+    return '<div class="ep-step ' + cls + '"><div class="dot">' + (i < at ? '✓' : (i + 1)) + '</div>' +
+      '<div class="lb">' + esc(m.lb) + '</div><div class="dt tabnum">' + (m.d ? fmtDate(m.d) : '') + '</div></div>';
+  }).join('');
+  var s = EP_EXP_STAGES.find(function (x) { return x.key === REC.stage; });
+  $('stage-pill').textContent = s ? s.label : REC.stage;
+}
+
+/* --------------------------------------------------------------- TABS */
+function tabList() {
+  if (VIEW === 'vendor') return [
+    { k:'letter', t:'Introduction Letter', n: REC.intro ? epLetterOpen(REC).length : 0, rose:true },
+    { k:'docs',   t:'Document Register', n: REC.reg ? REC.reg.rows.filter(function (r) { return !r.deleted; }).length : 0 },
+    { k:'sched',  t:'Schedule' },
+  ];
+  var chk = REC.reg ? epRegCheck(REC).filter(function (c) { return c.sev === 'rose'; }).length : 0;
+  return [
+    { k:'head',  t:'Order Head' },
+    { k:'mr',    t:'MR Study' },
+    { k:'docs',  t:'Document Control', n: chk, rose:true },
+    { k:'sched', t:'Schedule' },
+    { k:'mfg',   t:'Manufacturing' },
+    { k:'ship',  t:'Shipment & Delivery' },
+    { k:'close', t:'Closeout' },
+    { k:'log',   t:'Follow-up Log' },
+  ];
+}
+function renderTabs() {
+  var list = tabList();
+  if (!list.some(function (t) { return t.k === TAB; })) TAB = list[0].k;
+  $('tabs').innerHTML = list.map(function (t) {
+    return '<div class="ep-tab' + (t.k === TAB ? ' active' : '') + '" data-tab="' + t.k + '">' + esc(t.t) +
+      (t.n ? '<span class="n' + (t.rose ? ' rose' : '') + '">' + t.n + '</span>' : '') + '</div>';
+  }).join('');
+}
+
+/* ==================================================== TAB: ORDER HEAD */
+function tabHead() {
+  var ackDays = REC.ackDate ? epXDiff(REC.issuedOn, REC.ackDate) : null;
+  var html = '';
+  html += '<div class="ep-note">Study the order before the kickoff: what it is, what it costs, when it must land, how it is paid — then the MR Study tab for the ITR and the SDR that drive the document request.</div>';
+
+  /* progress, computed from the register and the schedule */
+  var st = epRegStats(REC), pr = REC.sch ? epSchProgress(REC) : { planned:null, actual:null };
+  var fc = REC.sch ? epSchForecastDelivery(REC) : '';
+  var lots = (REC.lots || []).filter(function (l) { return l.date; }).map(function (l) { return l.date; }).sort();
+  var contractual = lots.length ? lots[lots.length - 1] : '';
+  var slip = fc && contractual ? epXDiff(contractual, fc) : null;
+  var subs = (REC.sch && REC.sch.subs) || [];
+  var negF = subs.filter(function (s) { var c = epSubCalc(s); return c.float != null && c.float < 0; }).length;
+  html += '<div class="ep-kpis">' +
+    kpi('Schedule progress', pr.planned == null ? '—' : pr.actual + '%', pr.planned == null ? 'no baseline dated yet' : 'planned ' + pr.planned + '% today', pr.planned != null && pr.actual < pr.planned) +
+    kpi('Forecast delivery', fc ? fmtDate(fc) : '—', contractual ? 'contractual ' + fmtDate(contractual) + (slip > 0 ? ' · ' + slip + 'd late' : '') : 'no lot date', slip > 0) +
+    kpi('Documents', st.total ? st.submitted + ' / ' + st.total : '—', st.total ? st.approved + ' approved · ' + st.overdue + ' overdue' : 'register not created', st.overdue > 0) +
+    kpi('Sub-orders', subs.length || '—', subs.length ? (negF ? negF + ' with negative float' : 'all with float') : 'none recorded', negF > 0) +
+    kpi('Letter replies', REC.intro ? (REC.intro.points.filter(function (p) { return p.reply; }).length - epLetterOpen(REC).length) + ' / ' + REC.intro.points.filter(function (p) { return p.reply; }).length : '—',
+        REC.intro ? 'sent ' + fmtDate(REC.intro.sentOn) : 'not sent', REC.intro && epLetterOpen(REC).length > 0) +
+    '</div>';
+
+  html += '<div class="ep-card-title" style="margin-bottom:10px;">Purchase Order — read from the order, never retyped</div>';
+  html += '<div class="ep-fields">' +
+    f('PO number', esc(REC.po)) + f('Rev', 'Rev ' + esc(REC.rev)) + f('Supplier', esc(REC.supplier)) +
+    f('Value', '<span class="tabnum">' + money(REC.value) + '</span>') +
+    f('MR', esc(REC.mrRef)) + f('Enquiry', esc(REC.enquiry)) + f('Project', esc(REC.project) + ' · ' + esc(REC.head)) +
+    f('Buyer', esc(REC.buyer)) + f('Incoterm', esc(REC.incoterm || '—')) + f('Delivery point', esc(REC.deliveryPoint || '—')) +
+    f('Issued at', '<span class="tabnum">' + esc(REC.issuedAt || fmtDate(REC.issuedOn)) + '</span>') +
+    f('Lines / Qty', '<span class="tabnum">' + n(REC.lines) + ' lines · ' + n(REC.qty) + '</span>') +
+    f('Payment terms', esc(REC.payment || '—')) + f('Origin / ship mode', esc((REC.origin || '—') + (REC.shipMode ? ' · ' + REC.shipMode : ''))) +
+    f('Hold on order', '<span class="tabnum">' + n(REC.hold) + '</span>') +
+    f('Acknowledged', REC.ackDate ? fmtDate(REC.ackDate) +
+        (ackDays != null && ackDays <= 3 ? ' <span class="ep-pill teal sm">within 72h</span>' : ' <span class="ep-pill warn sm">' + (ackDays == null ? '?' : ackDays) + 'd — 72h KPI missed</span>')
+      : '<span class="ep-pill warn sm">not yet — chase</span>', true) +
+    '</div>';
+
+  /* lots, with the forecast the schedule now gives */
+  html += '<div class="ep-card flush"><div class="ep-card-title">Delivery lots — promised, with grace and LD' +
+    '<span style="font-size:11px;color:#94a3b8;font-weight:600;">from the PO; forecast from the Schedule tab' +
+    (REC.demo ? ' · <span style="color:#b45309;">dates MODELLED — ' + esc(REC.lotBasis || 'Start Demo') + '</span>' : '') + '</span></div>' +
+    '<table class="ep-table"><thead><tr><th>Lot</th><th>Promised</th><th>Forecast (schedule)</th><th>Grace</th><th>LD</th><th>Status</th><th>Days past due</th></tr></thead><tbody>' +
+    (REC.lots || []).map(function (l) {
+      var d = l.date ? epExpDays(l.date) : null;
+      var over = d == null ? null : Math.max(0, d - (l.grace || 0));
+      var done = epExpStageIndex(REC.stage) >= epExpStageIndex('delivered');
+      var fslip = fc && l.date ? epXDiff(l.date, fc) : null;
+      return '<tr><td><b>' + esc(l.id) + '</b></td><td class="tabnum">' + (l.date ? fmtDate(l.date) : '—') + '</td>' +
+        '<td class="tabnum">' + (fc ? fmtDate(fc) + (fslip > 0 ? ' <span class="ep-pill rose sm">+' + fslip + 'd</span>' : ' <span class="ep-pill teal sm">on time</span>') : '<span style="color:#94a3b8;">no schedule yet</span>') + '</td>' +
+        '<td class="tabnum">' + (l.grace || 0) + 'd</td>' +
+        '<td>' + (l.ld ? '<span class="ep-pill rose sm">applies</span>' : '<span class="ep-pill slate sm">no</span>') + '</td>' +
+        '<td>' + (done ? '<span class="ep-pill teal sm">delivered</span>' : over == null ? '—' : over > 0 ? '<span class="ep-pill rose sm">late</span>' : '<span class="ep-pill warn sm">open</span>') + '</td>' +
+        '<td class="tabnum">' + (over != null && over > 0 && !done ? '<b style="color:#e11d48;">' + over + 'd</b>' : '—') + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+
+  /* introduction letter */
+  html += '<div class="ep-card"><div class="ep-card-title">Introduction letter — on the portal' +
+    (REC.intro ? '<span class="ep-pill teal sm">sent ' + fmtDT(REC.intro.sentOn) + '</span>' : '<span class="ep-pill warn sm">not sent</span>') + '</div>';
+  if (!REC.intro) {
+    html += '<div class="ep-sub" style="margin-bottom:10px;">Replaces the expediting e-mail: the header and the requests are generated from this order, the priority documents are picked from the MR’s SDR codes, and the vendor answers each point on the portal.</div>' +
+      '<button class="ep-btn primary" data-act="letter">Prepare the introduction letter</button>';
+  } else {
+    html += letterReplies(false);
+  }
+  html += '</div>';
+
+  /* kickoff */
+  html += '<div class="ep-card"><div class="ep-card-title">Kickoff meeting' +
+    (REC.kickoffOn ? '<span class="ep-pill teal sm">held ' + fmtDate(REC.kickoffOn) + '</span>' : '<span class="ep-pill warn sm">not held</span>') + '</div>' +
+    '<div class="ep-sub" style="margin-bottom:10px;">The meeting where the supplier is asked for the documents. After it, the vendor fills the register (SDRL codes) and the schedule on the portal.</div>' +
+    (REC.kickoffOn ? '<div class="ep-sub"><b>Notes:</b> ' + esc(REC.kickoffNotes || '—') + '</div>' : '') +
+    '<div style="margin-top:12px;"><button class="ep-btn ' + (REC.kickoffOn ? 'secondary' : 'primary') + ' sm" data-act="kickoff">' +
+    (REC.kickoffOn ? 'Update kickoff' : 'Record kickoff meeting') + '</button></div></div>';
+  return html;
+
+  function f(k, v, plain) { return '<div class="ep-f' + (plain ? '' : ' src') + '"><div class="k">' + k + '</div><div class="v">' + (v || '—') + '</div></div>'; }
+  function kpi(k, v, s, bad) {
+    return '<div class="ep-kpi"><div class="k">' + k + '</div><div class="v tabnum" style="color:' + (bad ? '#e11d48' : '#0f766e') + ';">' + v + '</div><div class="s">' + esc(s) + '</div></div>';
+  }
+}
+
+/* ==================================================== TAB: MR STUDY */
+function tabMr() {
+  var x = epExpMrExtract(REC);
+  var ms = REC.mrStudy = REC.mrStudy || {};
+  var html = '<div class="ep-note">The expeditor’s first job: read the MR. The reader opens the PDF, reads the <b>table of contents</b> (pages 1–3), finds which attachments are the <b>ITR</b> (Inspection Test Requirements) and the <b>SDR</b> (Supplier Data Requirements), finds their pages by their own header, and lays them out below — page images to check by eye, then tables the rest of the module works from.</div>';
+  if (!x) {
+    return html + '<div class="ep-card ep-empty"><div class="big">No MR read for ' + esc(REC.mrRef) + ' yet</div>' +
+      '<div class="ep-sub" style="margin-bottom:14px;">Pick the MR PDF — the contents are read, ATTACH-ITR / SDR found and extracted. Nothing is uploaded anywhere; it is read in this browser.</div>' +
+      '<button class="ep-btn primary" data-act="mr-read">Read an MR PDF</button></div>';
+  }
+  var t = x.toc || {}, h = t.head || {};
+  var itr = x.itr || {}, sdr = x.sdr || {};
+  html += '<div class="ep-row" style="margin-bottom:10px;"><b style="font-size:13px;">MR ' + esc(h.req || REC.mrRef) + '</b>' +
+    '<span class="ep-sub">' + esc(h.material || '') + ' · ' + esc(h.client || '') + ' · ' + esc(x.file || '') + ' · ' + n(x.pages) + ' pages · read ' + fmtDT(x.readOn) + '</span>' +
+    '<span class="ep-pill teal sm">FILE DATA — the buyer’s MR</span><span class="ep-sp"></span>' +
+    '<button class="ep-btn secondary sm" data-act="mr-read">Read another MR PDF</button></div>';
+  html += '<div class="ep-flow">' +
+    flow('1 · Contents', 'pages ' + (t.tocPages || []).join(', '), (t.attachments || []).length + ' attachments listed') +
+    flow('2 · ITR found', itr.roman ? 'ATTACH-' + itr.roman : '—', itr.pages ? 'pages ' + itr.pages[0] + '–' + itr.pages[itr.pages.length - 1] + ' (cover ' + itr.cover + ')' : '') +
+    flow('3 · SDR found', sdr.roman ? 'ATTACH-' + sdr.roman : '—', sdr.pages ? 'pages ' + sdr.pages[0] + '–' + sdr.pages[sdr.pages.length - 1] + ' (cover ' + sdr.cover + ')' : '') +
+    flow('4 · Extracted', (sdr.rows || []).length + ' SDR codes', (itr.rows || []).length + ' ITR activities · level ' + (itr.level || '?')) +
+    flow('5 · Checked by eye', ms.checkedOn ? fmtDate(ms.checkedOn) : 'not yet', ms.checkedBy || 'open the pages below') +
+    '</div>';
+
+  html += '<div class="ep-card"><div class="ep-card-title">Attachments in the table of contents<span class="ep-sub">the ITR and SDR are found by title, not by number</span></div><div class="ep-att">' +
+    (t.attachments || []).map(function (a) {
+      var hit = (itr.roman === a.roman || sdr.roman === a.roman);
+      return '<div class="' + (hit ? 'hit' : a.notUsed ? 'na' : '') + '"><b>ATTACH-' + esc(a.roman) + (a.notUsed ? ' · not used' : '') + '</b>' + esc(a.title) + (a.pages ? ' · ' + a.pages + ' p' : '') + '</div>';
+    }).join('') + '</div></div>';
+
+  /* pages to check by eye */
+  var pages = (itr.pages || []).concat(sdr.pages || []);
+  html += '<div class="ep-card"><div class="ep-card-title">The pages, as they are — check them with your own eye' +
+    (ms.checkedOn ? '<span class="ep-pill teal sm">checked ' + fmtDate(ms.checkedOn) + ' by ' + esc(ms.checkedBy) + '</span>'
+                  : '<button class="ep-btn primary sm" data-act="mr-checked">I have checked the pages</button>') + '</div>' +
+    '<div class="ep-thumbs">' + pages.map(function (pn) {
+      var img = epExpMrImage(REC, pn);
+      var kind = (itr.pages || []).indexOf(pn) >= 0 ? 'ITR' : 'SDR';
+      var k = (kind === 'ITR' ? itr : sdr).pages.indexOf(pn) + 1;
+      return '<div class="ep-thumb" data-page="' + pn + '">' + (img ? '<img src="' + img + '" alt="page ' + pn + '">' : '<div style="height:166px;border:1px dashed #cbd5e1;border-radius:5px;display:flex;align-items:center;justify-content:center;color:#94a3b8;">no image</div>') +
+        '<span>' + kind + ' p.' + k + ' · page ' + pn + '</span></div>';
+    }).join('') + '</div></div>';
+
+  /* SDR table */
+  html += '<div class="ep-card flush"><div class="ep-card-title">SDR — Supplier Data Requirements (ATTACH-' + esc(sdr.roman || '') + ')' +
+    '<span class="ep-row"><span class="ep-sub">' + (sdr.rows || []).length + ' codes · class and custodian from the SDRL master · planned = PO issue + date required</span>' +
+    '<button class="ep-btn primary sm" data-act="reg-go">Use it for the register →</button></span></div>' +
+    '<div style="overflow:auto;"><table class="ep-table"><thead><tr><th>Code</th><th>Description</th><th>With bid</th><th>Priority</th><th>First issue</th><th>Date reqd</th><th>Planned</th><th>Review</th><th>Dossier</th><th>Class</th><th>Custodian</th><th>Remarks</th></tr></thead><tbody>' +
+    (sdr.rows || []).map(function (r) {
+      var d = epSdrl(r.code) || {};
+      return '<tr title="' + esc(r.note || '') + '"><td><b>' + esc(r.code) + '</b></td><td>' + esc(r.desc) + (r.note ? ' <span class="ep-chip min" title="' + esc(r.note) + '">notes</span>' : '') + '</td>' +
+        '<td>' + esc(r.withBid) + '</td><td>' + esc(r.priority) + '</td><td>' + esc(r.firstIssue) + '</td><td class="tabnum"><b>' + esc(r.dateReq) + '</b></td>' +
+        '<td class="tabnum">' + fmtDate(epRegPlannedFrom(REC, r.dateReq)) + '</td>' +
+        '<td>' + (r.review === 'A' ? '<span class="ep-pill teal sm">A · approval</span>' : r.review === 'I' ? '<span class="ep-pill slate sm">I · info</span>' : '') + '</td>' +
+        '<td>' + esc(r.dossier) + '</td><td class="tabnum">' + esc(d.cls || '') + '</td><td>' + esc(d.custodian || '') + '</td><td style="max-width:240px;">' + esc(r.remarks) + '</td></tr>';
+    }).join('') + '</tbody></table></div>' +
+    '<div class="ep-sub" style="padding:10px 16px;">(1)(3)(6) quantity and type: C copy · E electronic · D DVD · (4) date required after placement of order: D days · W weeks · M months · WM with material · (5) A approval · I information. FINAL / WM are planned at the last delivery lot.</div></div>';
+
+  /* ITR table */
+  var lv = itr.level || '';
+  html += '<div class="ep-card flush"><div class="ep-card-title">ITR — Inspection Test Requirements (ATTACH-' + esc(itr.roman || '') + ')' +
+    '<span class="ep-row"><span class="ep-pill dark sm">Inspection level ' + esc(lv || '?') + '</span>' + (itr.criticality ? '<span class="ep-pill slate sm">criticality ' + esc(itr.criticality) + '</span>' : '') +
+    '<span class="ep-sub">H hold · W witness · R review · M monitor · A approval</span></span></div>' +
+    '<div style="overflow:auto;"><table class="ep-table"><thead><tr><th>Activity</th><th>Level I</th><th>Level II</th><th>Level III</th><th>Level IV</th><th>Company</th><th>Schedule</th><th>Remarks</th></tr></thead><tbody>';
+  var sec = '';
+  (itr.rows || []).forEach(function (r) {
+    if (r.section !== sec) { sec = r.section; html += '<tr class="grp"><td colspan="8">' + esc(sec) + '</td></tr>'; }
+    var pt = /H/.test(r[lv] + r.Comp) ? 'H' : /W/.test(r[lv] + r.Comp) ? 'W' : '';
+    html += '<tr><td>' + esc(r.activity) + '</td>' + ['I','II','III','IV'].map(function (k) { return '<td class="' + (k === lv ? 'lv' : '') + '">' + esc(r[k]) + '</td>'; }).join('') +
+      '<td><b>' + esc(r.Comp) + '</b></td><td>' + (pt ? '<span class="ep-chip ' + pt + '">' + (pt === 'H' ? 'HOLD' : 'WITNESS') + ' point</span>' : '') + '</td><td>' + esc(r.remarks) + '</td></tr>';
+  });
+  html += '</tbody></table></div>' +
+    '<div style="padding:10px 16px;">' + (itr.notes || []).map(function (t) { return '<div class="ep-sub">' + esc(t) + '</div>'; }).join('') + '</div></div>';
+
+  /* the study itself */
+  var pim = (itr.rows || []).find(function (r) { return /pre-inspection/i.test(r.activity); });
+  html += '<div class="ep-card"><div class="ep-card-title">What the order and the MR require — the study' +
+    (ms.done ? '<span class="ep-pill teal sm">studied ' + fmtDate(ms.on) + '</span>' : '<span class="ep-pill warn sm">not recorded</span>') + '</div>' +
+    '<div class="ep-fields" style="grid-template-columns:repeat(3,1fr);">' +
+    fx('PIM', pim ? 'Required — NPCC ' + pim[lv] + ' / Company ' + pim.Comp + ' (4 weeks’ notice)' : 'not in the ITR') +
+    fx('Hold points', epMrItrPoints(itr).filter(function (p) { return p.kind === 'H'; }).map(function (p) { return p.activity; }).join(' · ') || '—') +
+    fx('Witness points', epMrItrPoints(itr).filter(function (p) { return p.kind === 'W'; }).length + ' activities') +
+    fx('Documents (SDR)', (sdr.rows || []).length + ' codes · ' + (sdr.rows || []).filter(function (r) { return r.review === 'A'; }).length + ' for approval') +
+    fx('Payment terms', REC.payment || ms.payment || '—') +
+    fx('Bank guarantee', ms.bg || '—') +
+    '</div><div class="ep-sub"><b>Notes:</b> ' + esc(ms.notes || '—') + '</div>' +
+    '<div style="margin-top:10px;"><button class="ep-btn ' + (ms.done ? 'secondary' : 'primary') + ' sm" data-act="study">' + (ms.done ? 'Edit the study' : 'Record the study — before the kickoff') + '</button></div></div>';
+  return html;
+
+  function flow(k, v, d) { return '<div class="s"><div class="k">' + k + '</div><div class="v">' + esc(v) + '</div><div class="d">' + esc(d) + '</div></div>'; }
+  function fx(k, v) { return '<div class="ep-f"><div class="k">' + k + '</div><div class="v wrap">' + esc(v) + '</div></div>'; }
+}
+
+function pageModal(pn) {
+  var x = epExpMrExtract(REC); if (!x) return;
+  var all = (x.itr ? x.itr.pages : []).concat(x.sdr ? x.sdr.pages : []);
+  var i = all.indexOf(pn);
+  modal('MR page ' + pn + ' of ' + x.pages, '<div style="text-align:center;"><img src="' + epExpMrImage(REC, pn) + '" style="max-width:100%;border:1px solid #cbd5e1;"></div>',
+    null, { wide:'xwide', foot:
+      '<button class="ep-btn secondary" id="pg-prev"' + (i <= 0 ? ' disabled' : '') + '>← Previous</button>' +
+      '<button class="ep-btn secondary" id="pg-next"' + (i >= all.length - 1 ? ' disabled' : '') + '>Next →</button>' +
+      '<button class="ep-btn primary" id="pg-close">Close</button>' });
+  $('pg-close').onclick = closeModal;
+  if ($('pg-prev')) $('pg-prev').onclick = function () { pageModal(all[i - 1]); };
+  if ($('pg-next')) $('pg-next').onclick = function () { pageModal(all[i + 1]); };
+}
+
+function mrReadModal() {
+  modal('Read an MR PDF',
+    '<div class="ep-sub" style="margin-bottom:10px;">Pick the material requisition PDF. The reader goes through the contents (pages 1–3), finds the ITR and SDR attachments by their titles, locates their pages by their own header, renders them and extracts the tables. The file stays in this browser.</div>' +
+    '<button class="ep-btn primary" id="mr-pick">Choose the PDF…</button> <span class="ep-sub" id="mr-file"></span>' +
+    '<div class="ep-prog" id="mr-prog" style="margin-top:12px;">waiting for a file…</div><div id="mr-res" style="margin-top:12px;"></div>',
+    null, { wide:'wide', foot:'<button class="ep-btn secondary" id="mr-cancel">Close</button><button class="ep-btn primary" id="mr-use" disabled>Use for this order</button>' });
+  var result = null;
+  $('mr-cancel').onclick = closeModal;
+  $('mr-pick').onclick = function () { $('file-pdf').value = ''; $('file-pdf').click(); };
+  $('file-pdf').onchange = async function () {
+    var f = this.files[0]; if (!f) return;
+    $('mr-file').textContent = f.name + ' · ' + (f.size / 1048576).toFixed(1) + ' MB';
+    var prog = $('mr-prog'); prog.textContent = '';
+    var step = function (s) { prog.textContent += s + '\n'; prog.scrollTop = 1e9; };
+    try {
+      var buf = await f.arrayBuffer();
+      result = await epMrExtract(buf, f.name, step, { scale:1.1, quality:0.6 });
+    } catch (e) { step('Could not read it: ' + e.message); return; }
+    if (!result.ok) { step(result.msg); return; }
+    $('mr-res').innerHTML = '<div class="ep-note">Contents: ' + result.toc.attachments.length + ' attachments · ITR = ATTACH-' + esc(result.itr ? result.itr.roman : '?') +
+      ' (pages ' + esc(result.itr ? result.itr.pages.join(', ') : '') + ') · SDR = ATTACH-' + esc(result.sdr ? result.sdr.roman : '?') +
+      ' (pages ' + esc(result.sdr ? result.sdr.pages.join(', ') : '') + ') · <b>' + (result.sdr ? result.sdr.rows.length : 0) + ' SDR codes</b>, <b>' + (result.itr ? result.itr.rows.length : 0) + ' ITR activities</b>.' +
+      (result.toc.head.req && result.toc.head.req.replace(/\//g, '-') !== String(REC.mrRef).replace(/\//g, '-') ? '<br><b style="color:#b45309;">This PDF is MR ' + esc(result.toc.head.req) + ' — the order is on MR ' + esc(REC.mrRef) + '.</b>' : '') + '</div>';
+    $('mr-use').disabled = false;
+  };
+  $('mr-use').onclick = function () {
+    if (!result) return;
+    REC.mrStudy = REC.mrStudy || {};
+    REC.mrStudy.extract = result; REC.mrStudy.checkedOn = ''; REC.mrStudy.checkedBy = '';
+    addLog('MR read from ' + result.file + ' — ITR ATTACH-' + (result.itr ? result.itr.roman : '?') + ', SDR ATTACH-' + (result.sdr ? result.sdr.roman : '?') + '.');
+    try { saveRec(); } catch (e) { toast('Saved without page images — the browser storage is full.'); }
+    closeModal(); render(); toast('MR read — check the pages by eye.');
+  };
+}
+
+/* ==================================================== TAB: DOCUMENT CONTROL — the register */
+function tabDocs() {
+  var g = REC.reg;
+  var adnoc = epExpClientKind(REC) === 'adnoc';
+  var kind = adnoc ? 'VENDOR DATA REGISTER' : 'SUPPLIER DATA REGISTER';
+  var x = epExpMrExtract(REC);
+  var sdrN = (x && x.sdr && x.sdr.rows || []).length;
+  var html = '';
+  if (VIEW === 'vendor') {
+    html += '<div class="ep-note">Your ' + (adnoc ? 'Vendor' : 'Supplier') + ' Data Register for this order. Register every document you will submit under its <b>SDRL code</b> \u2014 the code is what registers it. Edit the cells here, or download the .xlsx, fill it and upload it back. Every change is marked with who made it.</div>';
+  } else {
+    html += '<div class="ep-note">The register: one row per coded document. Create it from the MR\u2019s SDR, then you and the vendor both work on it \u2014 add or delete rows, add columns, upload the vendor\u2019s Excel. Every change is marked (who, side, when, old value); a deleted row stays, struck through, with its reason. Review status is set by NPCC.</div>';
+  }
+  if (!g || !g.rows.length) {
+    return html + '<div class="ep-card ep-empty"><div class="big">No register yet</div>' +
+      '<div class="ep-sub" style="margin-bottom:14px;">' + (sdrN ? 'The MR\u2019s SDR lists ' + sdrN + ' codes. Creating the register adds one row per code with its NPCC number, class, title and planned date already filled.' : 'No SDR read for this MR yet \u2014 read the MR on the MR Study tab, or start the register empty and add codes from the SDRL master.') + '</div>' +
+      (sdrN ? '<button class="ep-btn primary" data-act="reg-create">Create the register from the SDR (' + sdrN + ' codes)</button> ' : '') +
+      '<button class="ep-btn secondary" data-act="reg-add">Start empty \u2014 add a code</button></div>';
+  }
+  var st = epRegStats(REC);
+  var a001 = g.rows.find(function (r) { return r.code === 'A001' && !r.deleted; });
+  html += '<div class="ep-card" style="padding:12px 16px;">' +
+    '<div class="ep-row" style="margin-bottom:8px;"><b style="font-size:14px;letter-spacing:.04em;">' + kind + '</b><span class="ep-pill slate sm">' + (adnoc ? 'ADNOC layout' : 'Aramco layout') + '</span>' +
+    '<span class="ep-sp"></span><span class="ep-sub">version ' + (g.ver || 0) + ' \u00b7 created ' + fmtDate(g.createdOn) + ' by ' + esc(g.createdBy || '') + '</span></div>' +
+    '<div class="ep-fields" style="grid-template-columns:repeat(5,1fr);margin-bottom:0;">' +
+    hf('NMDC PO no.', REC.po) + hf('Equipment / material', REC.head) + hf('Vendor', REC.supplier) +
+    hf('Document no.', a001 ? a001.npcc : epRegNpccNo(REC, 'A001', 1)) + hf('Rev.', a001 && a001.rev ? a001.rev : '\u2014') + '</div></div>';
+
+  html += '<div class="ep-kpis">' +
+    kp('Documents', st.total, 'on the register') + kp('Submitted', st.submitted, 'actual date set') +
+    kp('Approved / accepted', st.approved, 'NPCC A/D or Company 1/2/4') + kp('Commented / rejected', st.commented + st.rejected, 'B / C / 3 / 5', st.rejected > 0) +
+    kp('Overdue', st.overdue, 'planned date passed, not submitted', st.overdue > 0) + '</div>';
+
+  /* toolbar */
+  html += '<div class="ep-card flush"><div class="ep-card-title"><span>Register \u2014 ' + st.total + ' document' + (st.total === 1 ? '' : 's') +
+    (g.rows.some(function (r) { return r.deleted; }) ? ' <span class="ep-sub">(+' + g.rows.filter(function (r) { return r.deleted; }).length + ' deleted, shown struck)</span>' : '') + '</span>' +
+    '<span class="ep-row">' +
+    '<button class="ep-btn primary sm" data-act="reg-add">+ Add row</button>' +
+    '<button class="ep-btn secondary sm" data-act="reg-col">+ Add column</button>' +
+    '<button class="ep-btn secondary sm" data-act="reg-cols">Columns</button>' +
+    '<button class="ep-btn secondary sm" data-act="reg-xlsx">Download .xlsx</button>' +
+    '<button class="ep-btn secondary sm" data-act="reg-up">Upload .xlsx</button>' +
+    (VIEW === 'npcc' && sdrN ? '<button class="ep-btn secondary sm" data-act="reg-create">Add missing SDR codes</button>' : '') +
+    '</span></div>';
+  html += '<div class="ep-row" style="padding:0 16px 8px;"><span class="ep-chip npc">NPCC change</span><span class="ep-chip ven">Vendor change</span><span class="ep-sub">\u2014 hover a marked cell to see who changed it, when, and the old value.</span></div>';
+
+  var cols = epRegCols(REC).filter(function (c) { return !(VIEW === 'vendor' && false); });
+  var hidden = (g.hidden[VIEW] || []);
+  var vis = cols.filter(function (c) { return hidden.indexOf(c.key) < 0; });
+  var extra = (g.extra || []).filter(function (e) { return hidden.indexOf('x:' + e.key) < 0; });
+  html += '<div class="ep-gridwrap"><table class="ep-grid" id="reg-grid"><thead><tr>' +
+    vis.map(function (c) { return '<th style="min-width:' + c.w + 'px;">' + esc(c.label) + '</th>'; }).join('') +
+    extra.map(function (e) { return '<th class="x" title="added by ' + esc(e.by) + ' (' + e.side + ') \u2014 kept apart from the fixed format">' + esc(e.label) + ' *</th>'; }).join('') +
+    '<th style="min-width:86px;"></th></tr></thead><tbody>';
+  g.rows.forEach(function (r) {
+    html += '<tr class="' + (r.deleted ? 'del' : '') + '" data-row="' + r.id + '">';
+    vis.forEach(function (c) { html += regCell(r, c); });
+    extra.forEach(function (e) { html += regCell(r, { key:'x:' + e.key, w:120 }); });
+    html += '<td class="act">' + (r.deleted
+      ? '<span class="ep-sub" title="' + esc(r.deleted.why) + '">deleted by ' + esc(r.deleted.by) + '</span> <button class="ep-btn xs secondary" data-act="reg-restore" data-id="' + r.id + '">Restore</button>'
+      : (VIEW === 'npcc' ? '<button class="ep-ico" title="File route / VDMS" data-act="reg-route" data-id="' + r.id + '">\u21c4</button>' : '') +
+        '<button class="ep-ico" title="Delete (reason required)" data-act="reg-del" data-id="' + r.id + '">\u2715</button>') + '</td></tr>';
+  });
+  html += '</tbody></table></div>';
+  html += '<div class="ep-sub" style="padding:10px 16px;">* NPCC status: A Accepted \u00b7 B Commented as marked \u00b7 C Not accepted \u00b7 D Retained for information \u00b7 ' +
+    'COMPANY status: 1 Approved without comment \u00b7 2 Approved with comments \u00b7 3 Reviewed with comments \u00b7 4 Information only \u00b7 5 Rejected \u00b7 ' +
+    'Serial continues 002 / 003\u2026 when more than one document sits under the same SDRL code.<br>Class 1: ' + EP_SDRL_CLASS_HELP[1] + ' \u00b7 Class 2: ' + EP_SDRL_CLASS_HELP[2] + ' \u00b7 Class 3: ' + EP_SDRL_CLASS_HELP[3] + '.</div></div>';
+
+  /* the check */
+  var chk = epRegCheck(REC);
+  html += '<div class="ep-card"><div class="ep-card-title">Check against the MR\u2019s SDR and the SDRL master' +
+    '<span class="ep-pill ' + (chk.some(function (c) { return c.sev === 'rose'; }) ? 'rose' : chk.length ? 'warn' : 'teal') + ' sm">' + (chk.length ? chk.length + ' point' + (chk.length > 1 ? 's' : '') : 'clean') + '</span></div>' +
+    (chk.length ? '<ul class="ep-issues">' + chk.map(function (c) { return '<li class="' + c.sev + '">' + esc(c.txt) + '</li>'; }).join('') + '</ul>'
+                : '<div class="ep-sub">Every SDR code is on the register, every code is in the SDRL master, classes match, serials run in order.</div>') + '</div>';
+  return html;
+
+  function hf(k, v) { return '<div class="ep-f src"><div class="k">' + k + '</div><div class="v">' + esc(v || '\u2014') + '</div></div>'; }
+  function kp(k, v, s, bad) { return '<div class="ep-kpi"><div class="k">' + k + '</div><div class="v tabnum" style="color:' + (bad ? '#e11d48' : '#0f766e') + ';">' + v + '</div><div class="s">' + s + '</div></div>'; }
+}
+function regCell(r, c) {
+  var key = c.key, isX = key.indexOf('x:') === 0;
+  var v = isX ? (r.x[key.slice(2)] || '') : (r[key] == null ? '' : r[key]);
+  var mk = r.marks && r.marks[key];
+  var cls = mk ? (mk.side === 'Vendor' ? 'mk-v' : 'mk-n') : '';
+  var tip = mk ? 'Changed by ' + mk.by + ' (' + mk.side + ') on ' + fmtDT(mk.on) + ' \u2014 was: ' + (mk.old === '' ? '(blank)' : mk.old) : '';
+  if (r.deleted) return '<td class="t">' + esc(key === 'route' ? EP_REG_ROUTES[v] || '' : v) + '</td>';
+  if (key === 'route') return '<td class="ro"><span class="ep-chip ' + (v === 'smartexpedit' ? 'npc' : 'min') + '">' + esc(EP_REG_ROUTES[v] || v) + '</span></td>';
+  if (key === 'npcc') return '<td class="ro tabnum" title="' + esc((epSdrl(r.code) || {}).custodian ? 'custodian ' + epSdrl(r.code).custodian : 'code not in the SDRL master') + '">' + esc(v) + (r.fromSdr ? '' : ' <span class="ep-chip ' + (r.by === 'Vendor' ? 'ven' : 'npc') + '">added</span>') + '</td>';
+  if (c.ro) return '<td class="ro tabnum">' + esc(v) + '</td>';
+  if (key === 'npccSt' || key === 'coSt') {
+    if (VIEW === 'vendor') return '<td class="ro ' + cls + '" title="' + esc(tip) + '">' + esc(v) + '</td>';
+    var opts = key === 'npccSt' ? ['', 'A', 'B', 'C', 'D'] : ['', '1', '2', '3', '4', '5'];
+    var lab = key === 'npccSt' ? EP_REG_NPCC_STATUS : EP_REG_CO_STATUS;
+    return '<td class="' + cls + '" title="' + esc(tip) + '"><select data-cell="' + key + '">' + opts.map(function (o) {
+      return '<option value="' + o + '"' + (String(v) === o ? ' selected' : '') + '>' + (o ? o + ' \u2014 ' + lab[o] : '') + '</option>'; }).join('') + '</select></td>';
+  }
+  var late = (key === 'planned' && v && !r.actual && v < today());
+  return '<td class="' + cls + (late ? ' bad' : '') + '" title="' + esc(tip || (late ? 'overdue \u2014 not submitted' : '')) + '"><input data-cell="' + key + '"' +
+    (c.date ? ' type="date"' : '') + ' value="' + esc(v) + '"' + (key === 'adnoc' && !v ? ' placeholder="assigned by Doc. Control"' : '') + '></td>';
+}
+
+function regAddModal() {
+  var x = epExpMrExtract(REC);
+  var sdr = {}; ((x && x.sdr && x.sdr.rows) || []).forEach(function (s) { sdr[s.code] = 1; });
+  modal('Add a row \u2014 pick the SDRL code',
+    '<div class="ep-sub" style="margin-bottom:8px;">The code registers the document: it sets the NPCC number (next serial under that code), the class and the custodian. Codes in the MR\u2019s SDR are marked.</div>' +
+    '<input class="ep-in" id="m-q" placeholder="Search code or title \u2014 e.g. X011, pickling, hardness">' +
+    '<div id="m-list" style="max-height:300px;overflow:auto;margin-top:8px;border:1px solid #e2e8f0;border-radius:7px;"></div>' +
+    '<div class="ep-lbl" style="margin-top:10px;">Title on the register (optional \u2014 defaults to the SDRL title)</div><input class="ep-in" id="m-title">',
+    null, { wide:'wide', foot:'<button class="ep-btn secondary" id="m-x">Cancel</button><button class="ep-btn primary" id="m-go" disabled>Add row</button>' });
+  var pick = '';
+  var draw = function () {
+    var q = ($('m-q').value || '').toLowerCase();
+    var list = EP_SDRL.filter(function (d) { return !q || (d.code + ' ' + d.title + ' ' + (d.group || '') + ' ' + d.custodian).toLowerCase().indexOf(q) >= 0; }).slice(0, 120);
+    $('m-list').innerHTML = list.map(function (d) {
+      return '<div data-code="' + d.code + '" style="padding:6px 10px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:12px;' + (pick === d.code ? 'background:#ccfbf1;' : '') + '">' +
+        '<b>' + d.code + '</b> ' + esc(d.title) + ' <span class="ep-sub">\u00b7 ' + esc(d.group || '') + ' \u00b7 ' + esc(d.custodian) + ' \u00b7 class ' + d.cls + '</span>' +
+        (sdr[d.code] ? ' <span class="ep-chip npc">in SDR</span>' : '') + '</div>';
+    }).join('') || '<div class="ep-sub" style="padding:10px;">No code matches \u2014 a document without an SDRL code cannot be registered.</div>';
+  };
+  draw();
+  $('m-q').oninput = draw;
+  $('m-list').onclick = function (e) { var t = e.target.closest('[data-code]'); if (!t) return; pick = t.getAttribute('data-code'); $('m-go').disabled = false; draw(); };
+  $('m-x').onclick = closeModal;
+  $('m-go').onclick = function () {
+    if (!pick) return;
+    if (!REC.reg || !REC.reg.rows.length) { epRegInit(REC); REC.reg.createdOn = new Date().toISOString(); REC.reg.createdBy = WHO(); }
+    var row = epRegAdd(REC, pick, WHO(), SIDE(), $('m-title').value.trim());
+    saveRec(); closeModal(); render(); toast('Added ' + row.npcc + '.');
+  };
+}
+
+function regColsModal() {
+  var g = REC.reg, h = g.hidden[VIEW] || [];
+  var cols = epRegCols(REC).concat((g.extra || []).map(function (e) { return { key:'x:' + e.key, label:e.label + ' *' }; }));
+  modal('Columns \u2014 your view',
+    '<div class="ep-sub" style="margin-bottom:10px;">Hide a column from <b>your own view</b>. The fixed columns stay in the register and in the .xlsx \u2014 they keep the data comparable across orders. Columns marked * were added on the register and are kept apart from the fixed format.</div>' +
+    cols.map(function (c) {
+      return '<label style="display:flex;gap:8px;align-items:center;padding:4px 0;font-size:12.5px;"><input type="checkbox" data-col="' + c.key + '"' + (h.indexOf(c.key) < 0 ? ' checked' : '') + (c.key === 'npcc' ? ' disabled' : '') + '> ' + esc(c.label) + '</label>';
+    }).join(''),
+    function () {
+      g.hidden[VIEW] = [];
+      document.querySelectorAll('[data-col]').forEach(function (b) { if (!b.checked) g.hidden[VIEW].push(b.getAttribute('data-col')); });
+      saveRec(); closeModal(); render();
+    });
+}
+
+function regUpload(file) {
+  file.arrayBuffer().then(epXlsxRead).then(function (parsed) {
+    var prev = epRegParseUpload(REC, parsed);
+    if (!prev.ok) { toast(prev.msg); return; }
+    if (SIDE() === 'Vendor') prev.changes = prev.changes.filter(function (c) { return c.field !== 'npccSt' && c.field !== 'coSt'; });
+    var fl = function (f) { return { npccSt:'NPCC status', coSt:'Company status', adnoc:'ADNOC no.', vendorNo:'Vendor no.', rev:'Rev', cls:'Class', title:'Title', planned:'Planned', actual:'Actual', remarks:'Remarks' }[f] || f.replace(/^x:/, ''); };
+    modal('Upload \u2014 what will change',
+      (prev.wrongPo ? '<div class="ep-note rose">This sheet carries the tag of <b>' + esc(prev.tagPo) + '</b>, not ' + esc(REC.po) + '.</div>' : '') +
+      (prev.stale ? '<div class="ep-note warn">This sheet was downloaded at register version ' + prev.tagVer + '; the register is now at version ' + REC.reg.ver + '. Changes made on the portal since then are listed as differences below \u2014 check before accepting.</div>' : '') +
+      (!prev.tag ? '<div class="ep-note warn">No SmartExpedit tag on this sheet \u2014 it was not downloaded from the portal. Columns were matched by their headers.</div>' : '<div class="ep-sub" style="margin-bottom:8px;">Tag: ' + esc(prev.tag) + '</div>') +
+      '<div class="ep-kpis" style="grid-template-columns:repeat(4,1fr);">' +
+      '<div class="ep-kpi"><div class="k">Cells changed</div><div class="v">' + prev.changes.length + '</div></div>' +
+      '<div class="ep-kpi"><div class="k">New rows</div><div class="v">' + prev.added.length + '</div></div>' +
+      '<div class="ep-kpi"><div class="k">Not on the sheet</div><div class="v">' + prev.missing.length + '</div></div>' +
+      '<div class="ep-kpi"><div class="k">Unknown codes</div><div class="v" style="color:' + (prev.unknown.length ? '#e11d48' : '#0f766e') + ';">' + prev.unknown.length + '</div></div></div>' +
+      (prev.extraCols.length ? '<div class="ep-note warn">Columns that are not in our format: <b>' + prev.extraCols.map(function (e) { return esc(e.label); }).join(', ') + '</b> \u2014 kept as marked extra columns.</div>' : '') +
+      (prev.changes.length ? '<table class="ep-table"><thead><tr><th>Document</th><th>Field</th><th>Was</th><th>Now</th></tr></thead><tbody>' +
+        prev.changes.slice(0, 80).map(function (c) { return '<tr><td class="tabnum">' + esc(c.npcc) + '</td><td>' + esc(fl(c.field)) + '</td><td style="color:#94a3b8;">' + esc(c.old || '(blank)') + '</td><td><b>' + esc(c.val || '(blank)') + '</b></td></tr>'; }).join('') + '</tbody></table>' : '') +
+      (prev.added.length ? '<div class="ep-lbl" style="margin-top:10px;">New rows</div>' + prev.added.map(function (a) { return '<div class="ep-sub">' + esc(a.npcc || '(no number)') + ' \u2014 ' + esc(a.title) + (a.code && !epSdrl(a.code) ? ' <b style="color:#e11d48;">unknown code</b>' : '') + '</div>'; }).join('') : '') +
+      (prev.missing.length ? '<div class="ep-lbl" style="margin-top:10px;">On the register but not on the sheet</div><div class="ep-sub">' + prev.missing.map(esc).join(' \u00b7 ') + '</div>' +
+        '<label style="display:flex;gap:8px;align-items:center;margin-top:6px;font-size:12px;"><input type="checkbox" id="m-delmiss"> delete these on the register (struck through, reason "not on the uploaded sheet")</label>' : ''),
+      function () {
+        epRegApplyUpload(REC, prev, WHO(), SIDE(), { deleteMissing: $('m-delmiss') && $('m-delmiss').checked });
+        addLog('Register uploaded from Excel by ' + WHO() + ' \u2014 ' + prev.changes.length + ' change(s), ' + prev.added.length + ' new row(s).');
+        saveRec(); closeModal(); render(); toast('Upload applied \u2014 every change is marked.');
+      }, { wide:'wide', ok:'Accept the changes' });
+  }).catch(function (e) { toast(e.message); });
+}
+
+function regRouteModal(id) {
+  var r = epRegFind(REC, id); if (!r) return;
+  var sheet = epRegVdmsSheet(REC, r);
+  modal('File route \u2014 ' + r.npcc,
+    '<div class="ep-sub" style="margin-bottom:10px;">Where the file itself lives. VDMS stays the document system: the portal can hand a row over to it with the cover-sheet data below, so the document controller does not retype it. <span class="ep-modelled">MODELLED</span> the hand-off is recorded here; the prototype has no link to the real VDMS.</div>' +
+    '<table class="ep-table">' + sheet.map(function (s) { return '<tr><th style="width:190px;">' + esc(s[0]) + '</th><td>' + esc(s[1]) + '</td></tr>'; }).join('') + '</table>' +
+    '<div class="ep-lbl" style="margin-top:12px;">Route</div><select class="ep-sel" id="m-route">' +
+    Object.keys(EP_REG_ROUTES).map(function (k) { return '<option value="' + k + '"' + (r.route === k ? ' selected' : '') + '>' + EP_REG_ROUTES[k] + '</option>'; }).join('') + '</select>',
+    function () {
+      var v = $('m-route').value;
+      if (v !== r.route) { epRegSetRoute(REC, id, v, WHO(), SIDE()); if (v === 'vdmsSent') addLog(r.npcc + ' handed over to VDMS (cover sheet data) \u2014 MODELLED.'); }
+      saveRec(); closeModal(); render();
+    }, { wide:'wide', ok:'Save route' });
+}
+
+function changeLogModal() {
+  var rows = [];
+  ((REC.reg && REC.reg.log) || []).forEach(function (e) { rows.push(Object.assign({ area:'Register' }, e)); });
+  ((REC.sch && REC.sch.log) || []).forEach(function (e) { rows.push(Object.assign({ area:'Schedule' }, e)); });
+  rows.sort(function (a, b) { return (b.on || '').localeCompare(a.on || ''); });
+  var fname = function (e) {
+    if (e.txt) return e.txt;
+    var row = e.area === 'Register' ? epRegFind(REC, e.row) : (REC.sch ? epSchFind(REC, e.row) : null);
+    var what = row ? (row.npcc || row.act) : e.code || '';
+    return what + ' \u2014 ' + e.field.replace(/^x:/, '') + ': ' + (e.old === '' ? '(blank)' : e.old) + ' \u2192 ' + (e.val === '' ? '(blank)' : e.val) + (e.why ? ' \u2014 why: ' + e.why : '');
+  };
+  modal('Change log \u2014 register and schedule',
+    rows.length ? '<table class="ep-table"><thead><tr><th>When</th><th>Who</th><th>Side</th><th>Area</th><th>Change</th></tr></thead><tbody>' +
+      rows.slice(0, 400).map(function (e) {
+        return '<tr><td class="tabnum" style="white-space:nowrap;">' + fmtDT(e.on) + '</td><td>' + esc(e.by) + '</td><td><span class="ep-chip ' + (e.side === 'Vendor' ? 'ven' : 'npc') + '">' + esc(e.side) + '</span></td><td>' + e.area + '</td><td>' + esc(fname(e)) + '</td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="ep-sub">No changes yet.</div>',
+    null, { wide:'xwide', foot:'<button class="ep-btn primary" id="m-x">Close</button>' });
+  $('m-x').onclick = closeModal;
+}
+
+/* ==================================================== INTRODUCTION LETTER */
+function letterText(L, points) {
+  var head = [['Project', REC.head ? 'Project ' + REC.project + ' \u2014 ' + REC.head : REC.project], ['PO number', REC.po], ['Material', REC.head || ''],
+    ['Total qty', n(REC.qty) + (REC.lines ? ' (' + REC.lines + ' lines)' : '')],
+    ['Contractual delivery', ((REC.lots || []).filter(function (l) { return l.date; }).map(function (l) { return l.id + ' ' + fmtDate(l.date); }).join('; ') || '\u2014') + ' \u2014 ' + (REC.incoterm || '')],
+    ['Vendor reference', (REC.intro && REC.intro.replies.wo && REC.intro.replies.wo.txt) || '(TBC)']];
+  return '<div class="ep-letter">Dear Gents,<br><br>Please note the following:' +
+    '<table>' + head.map(function (h) { return '<tr><td>' + esc(h[0]) + '</td><td>' + esc(h[1]) + '</td></tr>'; }).join('') + '</table>' +
+    '<ol>' + points.map(function (p) {
+      var rep = REC.intro && REC.intro.replies[p.key];
+      return '<li>' + esc(p.txt) + (p.reply && REC.intro && REC.intro.sentOn ? (rep
+        ? '<div class="ep-reply"><b>Vendor reply</b> ' + fmtDT(rep.on) + ' \u2014 ' + esc(replyText(p, rep)) + '</div>'
+        : '<div class="ep-reply open">awaiting the vendor\u2019s reply</div>') : '') + '</li>';
+    }).join('') + '</ol>' +
+    'We look forward to your cooperation and timely completion of our subject order. <b>Please send an itemized reply to the above by ' + fmtDate(L.replyBy) + '</b> with planned submission dates for the priority documents.<br><br>' +
+    esc(L.who || REC.assignedTo || '') + '<br><span class="ep-sub">Expediting \u2014 NMDC Energy</span></div>';
+}
+function replyText(p, r) {
+  if (p.key === 'ack') return 'acknowledged ' + fmtDate(r.date) + (r.file ? ' \u2014 ' + r.file : '');
+  if (p.key === 'docs') return Object.keys(r.dates || {}).map(function (c) { return c + ' ' + fmtDate(r.dates[c]); }).join(' \u00b7 ');
+  if (p.key === 'pbg') return r.date ? 'PBG/ABG by ' + fmtDate(r.date) : (r.txt || '');
+  if (p.key === 'vdms') return r.txt || 'confirmed';
+  return r.txt || '';
+}
+function letterReplies(full) {
+  var L = REC.intro;
+  var open = epLetterOpen(REC);
+  return '<div class="ep-sub" style="margin-bottom:8px;">Sent on the portal by ' + esc(L.sentBy) + ' \u00b7 reply by ' + fmtDate(L.replyBy) + ' \u00b7 ' +
+    (open.length ? '<b style="color:#b45309;">' + open.length + ' point(s) awaiting the vendor</b>' : '<b style="color:#047857;">all points answered</b>') + '</div>' +
+    L.points.filter(function (p) { return p.reply; }).map(function (p) {
+      var r = L.replies[p.key];
+      return '<div class="ep-row" style="padding:5px 0;border-bottom:1px solid #f1f5f9;font-size:12px;"><span class="ep-pill ' + (r ? 'teal' : 'warn') + ' sm">' + (r ? 'answered' : 'open') + '</span>' +
+        '<span style="min-width:200px;font-weight:600;">' + esc({ ack:'PO acknowledgement', wo:'Work order & PM contact', docs:'Priority documents', vdms:'VDMS', pbg:'PBG + ABG' }[p.key] || p.key) + '</span>' +
+        '<span class="ep-sub">' + (r ? esc(replyText(p, r)) + ' \u00b7 ' + fmtDT(r.on) : '') + '</span></div>';
+    }).join('') +
+    '<div style="margin-top:10px;"><button class="ep-btn secondary sm" data-act="letter">Open the letter</button></div>';
+}
+function letterModal() {
+  if (REC.intro) {
+    modal('Introduction letter \u2014 ' + REC.po, letterText(REC.intro, REC.intro.points), null,
+      { wide:'wide', foot:'<button class="ep-btn secondary" id="m-re">Prepare a new letter</button><button class="ep-btn primary" id="m-x">Close</button>' });
+    $('m-x').onclick = closeModal;
+    $('m-re').onclick = function () { var keep = REC.intro; REC.intro = null; letterModal(); REC.intro = keep; };
+    return;
+  }
+  var L = epLetterDraft(REC, REC.assignedTo || EP_EXP_MANAGER);
+  var x = epExpMrExtract(REC);
+  var sdr = (x && x.sdr && x.sdr.rows) || [];
+  var codes = sdr.length ? sdr.map(function (s) { return s.code; }) : EP_SDRL.filter(function (d) { return /^(A001|X002|Z002|Z003|R006|Y001|Y002)$/.test(d.code); }).map(function (d) { return d.code; });
+  var draw = function () {
+    $('m-prev').innerHTML = letterText(L, epLetterPoints(REC, L));
+  };
+  modal('Introduction letter \u2014 prepare and send on the portal',
+    '<div class="ep-sub" style="margin-bottom:10px;">Generated from the order \u2014 the header and the requests are not typed. Pick the priority documents from the MR\u2019s SDR codes; the vendor answers each point on the portal.</div>' +
+    '<div style="display:grid;grid-template-columns:260px 1fr;gap:14px;">' +
+    '<div><div class="ep-lbl">Priority documents</div><div style="max-height:260px;overflow:auto;border:1px solid #e2e8f0;border-radius:7px;padding:6px 8px;margin-top:4px;">' +
+    codes.map(function (c) { var d = epSdrl(c) || {}; return '<label style="display:flex;gap:6px;font-size:11.5px;padding:2px 0;"><input type="checkbox" data-pri="' + c + '"' + (L.priority.indexOf(c) >= 0 ? ' checked' : '') + '> <b>' + c + '</b> ' + esc(d.title || '') + '</label>'; }).join('') + '</div>' +
+    '<div class="ep-lbl" style="margin-top:10px;">Reply by</div><input type="date" class="ep-in" id="m-by" value="' + L.replyBy + '">' +
+    '<div class="ep-lbl" style="margin-top:10px;">VDMS clause of the order</div><input class="ep-in" id="m-cl" value="' + L.clause + '">' +
+    '<label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-top:10px;"><input type="checkbox" id="m-pbg" checked> PBG + ABG point</label></div>' +
+    '<div id="m-prev"></div></div>',
+    function () {
+      epLetterSend(REC, L, WHO());
+      addLog('Introduction letter sent on the portal \u2014 reply by ' + fmtDate(L.replyBy) + '; priority documents ' + L.priority.join(', ') + '.');
+      saveRec(); closeModal(); render(); toast('Sent on the portal \u2014 the vendor answers each point there.');
+    }, { wide:'xwide', ok:'Send on the portal' });
+  draw();
+  document.querySelectorAll('[data-pri]').forEach(function (b) { b.onchange = function () {
+    L.priority = Array.prototype.slice.call(document.querySelectorAll('[data-pri]')).filter(function (x) { return x.checked; }).map(function (x) { return x.getAttribute('data-pri'); }); draw(); }; });
+  $('m-by').onchange = function () { L.replyBy = this.value; draw(); };
+  $('m-cl').oninput = function () { L.clause = this.value; draw(); };
+  $('m-pbg').onchange = function () { L.pbg = this.checked; draw(); };
+}
+
+/* the vendor's side of the letter: answer each point */
+function tabLetter() {
+  var L = REC.intro;
+  if (!L) return '<div class="ep-card ep-empty"><div class="big">No introduction letter yet</div><div class="ep-sub">NMDC\u2019s expeditor sends it on the portal after the order is issued.</div></div>';
+  var html = '<div class="ep-note">Please answer each point below \u2014 the itemized reply is recorded against the order. Reply by <b>' + fmtDate(L.replyBy) + '</b>.</div>';
+  html += letterText(L, L.points);
+  html += '<div class="ep-card" style="margin-top:14px;"><div class="ep-card-title">Your reply</div>';
+  L.points.filter(function (p) { return p.reply; }).forEach(function (p) {
+    var r = L.replies[p.key] || {};
+    html += '<div style="padding:10px 0;border-bottom:1px solid #f1f5f9;"><div style="font-weight:700;font-size:12px;margin-bottom:6px;">' + esc({ ack:'2 \u00b7 Unconditional PO acknowledgement', wo:'3 \u00b7 Internal work order reference & Project Manager', docs:'4 \u00b7 Planned submission dates \u2014 priority documents', vdms:'5 \u00b7 VDMS', pbg:'6 \u00b7 PBG + ABG' }[p.key]) +
+      (L.replies[p.key] ? ' <span class="ep-pill teal sm">sent ' + fmtDT(r.on) + '</span>' : '') + '</div>';
+    if (p.key === 'ack') html += '<div class="ep-row"><span class="ep-lbl">Signed & stamped on</span><input type="date" class="ep-in" style="width:170px;" id="rp-ack-date" value="' + (r.date || today()) + '"><input class="ep-in" style="width:280px;" id="rp-ack-file" placeholder="file name of the signed copy" value="' + esc(r.file || '') + '"></div>';
+    if (p.key === 'wo' || p.key === 'vdms') html += '<input class="ep-in" id="rp-' + p.key + '" value="' + esc(r.txt || '') + '" placeholder="' + (p.key === 'wo' ? 'WO-12345 \u2014 Project Manager name, mobile, e-mail' : 'Confirmed \u2014 VDMS login received') + '">';
+    if (p.key === 'pbg') html += '<input type="date" class="ep-in" style="width:170px;" id="rp-pbg" value="' + esc(r.date || '') + '">';
+    if (p.key === 'docs') html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">' + (p.codes || []).map(function (c) {
+      var d = epSdrl(c) || {};
+      return '<label style="font-size:11.5px;"><b>' + c + '</b> ' + esc(d.title || '') + '<input type="date" class="ep-in" data-rp-doc="' + c + '" value="' + esc((r.dates || {})[c] || '') + '"></label>'; }).join('') + '</div>';
+    html += '<div style="margin-top:6px;"><button class="ep-btn primary sm" data-act="reply" data-key="' + p.key + '">' + (L.replies[p.key] ? 'Update reply' : 'Send reply') + '</button></div></div>';
+  });
+  html += '</div>';
+  return html;
+}
+function sendReply(key) {
+  var r = {};
+  if (key === 'ack') { r.date = $('rp-ack-date').value; r.file = $('rp-ack-file').value.trim(); if (!r.date) return toast('Give the acknowledgement date.'); }
+  if (key === 'wo' || key === 'vdms') { r.txt = $('rp-' + key).value.trim(); if (!r.txt) return toast('Write the reply first.'); }
+  if (key === 'pbg') { r.date = $('rp-pbg').value; if (!r.date) return toast('Give the date.'); }
+  if (key === 'docs') { r.dates = {}; document.querySelectorAll('[data-rp-doc]').forEach(function (i) { if (i.value) r.dates[i.getAttribute('data-rp-doc')] = i.value; }); }
+  epLetterReply(REC, key, r, WHO());
+  if (key === 'ack') { setStage('ack'); addLog('Vendor acknowledged the PO on the portal (' + fmtDate(r.date) + ').'); }
+  else addLog('Vendor replied on the portal \u2014 ' + key + '.');
+  /* the planned dates the vendor gives flow onto the register */
+  if (key === 'docs' && REC.reg) Object.keys(r.dates).forEach(function (c) {
+    var row = REC.reg.rows.find(function (x) { return x.code === c && !x.deleted; });
+    if (row) epRegSet(REC, row.id, 'planned', r.dates[c], WHO(), 'Vendor');
+  });
+  saveRec(); render(); toast('Reply sent \u2014 recorded on the order.');
+}
+
+/* ==================================================== TAB: SCHEDULE — the key tab */
+function tabSched() {
+  epSchInit(REC);
+  var s = SUB.sched;
+  var html = '<div class="ep-note">The schedule everything else relies on. The expeditor starts it with the minimum-requirement activities; the vendor adds rows and columns. ' +
+    'Baseline dates are contractual — once the schedule is accepted they freeze, and only a signed re-baseline can move them. After that only the forecast moves, and every move needs its dependency (why).</div>';
+  html += '<div class="ep-subtabs">' + [['act', 'Activity schedule'], ['items', 'Itemized — per PO line'], ['subs', 'Sub-orders'], ['issues', 'Issues & comments (Z003)']].map(function (t) {
+    return '<button data-sub="' + t[0] + '" class="' + (s === t[0] ? 'on' : '') + '">' + t[1] + '</button>'; }).join('') + '</div>';
+  if (s === 'items') return html + schItems();
+  if (s === 'subs') return html + schSubs();
+  if (s === 'issues') return html + schIssues();
+  return html + schActivities();
+}
+
+function schActivities() {
+  var sc = REC.sch, rows = sc.rows, fz = sc.frozen;
+  var pr = epSchProgress(REC), fc = epSchForecastDelivery(REC);
+  var lots = (REC.lots || []).filter(function (l) { return l.date; }).map(function (l) { return l.date; }).sort();
+  var contractual = lots.length ? lots[lots.length - 1] : '';
+  var itpMiss = epSchItpMissing(REC).length;
+  var html = '<div class="ep-kpis" style="grid-template-columns:repeat(4,1fr);">' +
+    '<div class="ep-kpi"><div class="k">Baseline</div><div class="v" style="font-size:15px;color:' + (fz ? '#0f766e' : '#b45309') + ';">' + (fz ? 'Frozen' : (sc.rebase.length ? 'Re-baseline open' : 'Draft — editable')) + '</div><div class="s">' + (fz ? 'accepted ' + fmtDT(fz.on) + ' by ' + esc(fz.by) : 'freezes when NPCC accepts the schedule') + '</div></div>' +
+    '<div class="ep-kpi"><div class="k">Progress (from the schedule)</div><div class="v tabnum" style="color:' + (pr.planned != null && pr.actual < pr.planned ? '#e11d48' : '#0f766e') + ';">' + (pr.planned == null ? '—' : pr.actual + '% / ' + pr.planned + '%') + '</div><div class="s">actual / planned today · ' + pr.n + ' dated rows</div></div>' +
+    '<div class="ep-kpi"><div class="k">Forecast delivery</div><div class="v tabnum" style="color:' + (fc && contractual && fc > contractual ? '#e11d48' : '#0f766e') + ';">' + (fc ? fmtDate(fc) : '—') + '</div><div class="s">contractual ' + (contractual ? fmtDate(contractual) : '—') + '</div></div>' +
+    '<div class="ep-kpi"><div class="k">Issued as Z003</div><div class="v">' + (sc.issues.length ? 'Rev ' + sc.issues.length : '—') + '</div><div class="s">' + (sc.issues.length ? 'last ' + fmtDate(sc.issues[sc.issues.length - 1].on) : 'not issued yet') + '</div></div></div>';
+
+  html += '<div class="ep-card flush"><div class="ep-card-title"><span>Activity schedule — ' + epSchLive(REC).length + ' rows</span><span class="ep-row">' +
+    '<button class="ep-btn primary sm" data-act="sch-add">+ Add activity</button>' +
+    '<button class="ep-btn secondary sm" data-act="sch-col">+ Add column</button>' +
+    (itpMiss ? '<button class="ep-btn secondary sm" data-act="sch-itp" title="Rule 4: all Witness and HOLD points of the ITP must be included">+ ITP hold / witness points (' + itpMiss + ')</button>' : '') +
+    (VIEW === 'npcc' && !fz ? '<button class="ep-btn secondary sm" data-act="sch-freeze">Accept & freeze baseline</button>' : '') +
+    (VIEW === 'npcc' && fz ? '<button class="ep-btn secondary sm" data-act="sch-rebase">Re-baseline (signed)</button>' : '') +
+    '<button class="ep-btn secondary sm" data-act="sch-issue">Issue as Z003 Rev ' + (sc.issues.length + 1) + '</button>' +
+    '<button class="ep-btn secondary sm" data-act="sch-xlsx">Download .xlsx</button></span></div>';
+
+  /* timeline span for the bars */
+  var all = [];
+  epSchLive(REC).forEach(function (r) { [r.bS, r.bE, r.fS, r.fE].forEach(function (d) { if (d) all.push(d); }); });
+  if (contractual) all.push(contractual);
+  all.sort();
+  var t0 = all[0] || REC.issuedOn, t1 = all[all.length - 1] || contractual || REC.issuedOn;
+  var span = Math.max(1, epXDiff(t0, t1) || 1);
+  var pos = function (d) { return Math.max(0, Math.min(100, (epXDiff(t0, d) / span) * 100)); };
+
+  var cols = EP_SCH_COLS, ex = sc.cols || [];
+  html += '<div class="ep-gridwrap"><table class="ep-grid" id="sch-grid"><thead><tr><th>Sr</th>' +
+    cols.map(function (c) { return '<th style="min-width:' + c.w + 'px;">' + esc(c.label) + (c.base && fz ? ' 🔒' : '') + '</th>'; }).join('') +
+    ex.map(function (e) { return '<th class="x" style="min-width:110px;" title="added by ' + esc(e.by) + ' (' + e.side + ')">' + esc(e.label) + ' *</th>'; }).join('') +
+    '<th style="min-width:200px;">Timeline <span style="font-weight:600;text-transform:none;">' + fmtDate(t0) + ' → ' + fmtDate(t1) + '</span></th><th></th></tr></thead><tbody>';
+  var sr = 0;
+  rows.forEach(function (r) {
+    if (r.deleted) {
+      html += '<tr class="del"><td></td><td colspan="' + (cols.length + ex.length + 1) + '" class="t">' + esc(r.act) + ' — deleted by ' + esc(r.deleted.by) + ': ' + esc(r.deleted.why) + '</td><td class="act"></td></tr>';
+      return;
+    }
+    sr++;
+    var sug = r.min && !r.na ? epSchNaSuggest(REC, r) : '';
+    html += '<tr data-row="' + r.id + '" class="' + (r.na ? 'na ' : '') + (r.kind === 'itp' ? 'itp' : '') + '"><td class="ro tabnum">' + sr + '</td>';
+    cols.forEach(function (c) {
+      var v = r[c.key] == null ? '' : r[c.key];
+      var mk = r.marks && r.marks[c.key];
+      var cls = mk ? (mk.side === 'Vendor' ? 'mk-v' : 'mk-n') : '';
+      var tip = mk ? 'Changed by ' + mk.by + ' (' + mk.side + ') ' + fmtDT(mk.on) + ' — was: ' + (mk.old || '(blank)') : '';
+      var bad = (c.key === 'bE' && r.bS && v && v < r.bS) || (c.key === 'fE' && r.fS && v && v < r.fS) || (c.key === 'bS' && v && REC.issuedOn && v < REC.issuedOn && !/^PO date/.test(r.act)) ||
+                (c.key === 'fE' && v && r.bE && v > r.bE);
+      if (c.key === 'act') {
+        html += '<td class="' + cls + '" title="' + esc(tip) + '">' + (r.min ? '<div style="display:flex;align-items:center;padding:0 7px;"><b style="font-size:11.5px;">' + esc(v) + '</b><span class="ep-chip min" title="minimum requirement — locked in">min</span>' +
+          (r.na ? '<span class="ep-chip min" title="' + esc(r.na.why) + '">N/A</span>' : '') +
+          (sug ? '<button class="ep-btn xs secondary" style="margin-left:6px;" data-act="sch-na" data-id="' + r.id + '" data-why="' + esc(sug) + '" title="' + esc(sug) + '">N/A?</button>' : '') + '</div>'
+          : '<div style="display:flex;align-items:center;"><input data-cell="act" value="' + esc(v) + '">' + (r.itp ? '<span class="ep-chip ' + r.itp + '" title="ITP: NPCC ' + esc(r.itpNpcc) + ' / Company ' + esc(r.itpCo) + '">' + r.itp + '</span>' : '') +
+            (r.by === 'Vendor' ? '<span class="ep-chip ven">vendor</span>' : '') + '</div>') + '</td>';
+        return;
+      }
+      var lockB = c.base && fz;
+      html += '<td class="' + cls + (bad ? ' bad' : '') + '" title="' + esc(tip || (lockB ? 'frozen baseline' : '')) + '"><input data-cell="' + c.key + '"' + (c.date ? ' type="date"' : '') +
+        ' value="' + esc(v) + '"' + (lockB || r.na ? ' readonly' : '') + '></td>';
+    });
+    ex.forEach(function (e) {
+      var v = r.x[e.key] || '';
+      html += '<td><input data-cell="x:' + e.key + '" value="' + esc(v) + '"' + (r.na ? ' readonly' : '') + '></td>';
+    });
+    /* bar: baseline above, forecast below, today line */
+    var bar = '';
+    if (r.bS || r.bE) { var a = r.bS || r.bE, b = r.bE || r.bS; bar += '<i class="b" style="left:' + pos(a) + '%;width:' + Math.max(1.5, pos(b) - pos(a)) + '%;"></i>'; }
+    if (r.fS || r.fE) { var c2 = r.fS || r.fE, d2 = r.fE || r.fS; bar += '<i class="f' + (r.bE && d2 > r.bE ? ' late' : '') + '" style="left:' + pos(c2) + '%;width:' + Math.max(1.5, pos(d2) - pos(c2)) + '%;"></i>'; }
+    if (today() >= t0 && today() <= t1) bar += '<i class="today" style="left:' + pos(today()) + '%;"></i>';
+    html += '<td class="t"><div class="ep-bar">' + bar + '</div></td>';
+    html += '<td class="act"><button class="ep-ico" title="Insert a row below" data-act="sch-ins" data-id="' + r.id + '">+</button>' +
+      (r.min ? '<button class="ep-ico" title="' + (r.na ? 'Make applicable again' : 'Not applicable (reason)') + '" data-act="sch-na" data-id="' + r.id + '">' + (r.na ? '↺' : '⊘') + '</button>'
+             : '<button class="ep-ico" title="Delete (reason required)" data-act="sch-del" data-id="' + r.id + '">✕</button>') + '</td></tr>';
+  });
+  html += '</tbody></table></div>' +
+    '<div class="ep-row" style="padding:8px 16px;"><span class="ep-sub">Timeline: <span style="display:inline-block;width:18px;height:5px;background:#cbd5e1;border-radius:3px;"></span> baseline · <span style="display:inline-block;width:18px;height:5px;background:#0d9488;border-radius:3px;"></span> forecast / actual (<span style="color:#e11d48;">red</span> = behind baseline) · <span style="display:inline-block;width:2px;height:10px;background:#f59e0b;"></span> today · ' +
+    '<span class="ep-chip min">min</span> minimum requirement · <span class="ep-chip H">H</span><span class="ep-chip W">W</span> ITP hold / witness</span></div></div>';
+
+  var chk = epSchChecks(REC);
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
+    '<div class="ep-card"><div class="ep-card-title">Checks<span class="ep-pill ' + (chk.some(function (c) { return c.sev === 'rose'; }) ? 'rose' : chk.length ? 'warn' : 'teal') + ' sm">' + (chk.length || 'clean') + '</span></div>' +
+    (chk.length ? '<ul class="ep-issues">' + chk.map(function (c) { return '<li class="' + c.sev + '">' + esc(c.txt) + '</li>'; }).join('') + '</ul>' : '<div class="ep-sub">No date runs backwards, nothing starts before the PO, nothing is past the contractual delivery.</div>') + '</div>' +
+    '<div class="ep-card"><div class="ep-card-title">Minimum requirement — notes</div>' +
+    EP_SCH_RULES.map(function (t, i) { return '<div class="ep-sub" style="padding:3px 0;"><b>' + (i + 1) + '.</b> ' + esc(t) + '</div>'; }).join('') +
+    (sc.rebase.length ? '<div class="ep-lbl" style="margin-top:10px;">Re-baselines</div>' + sc.rebase.map(function (b) { return '<div class="ep-sub">' + fmtDT(b.on) + ' — ' + esc(b.by) + ': ' + esc(b.why) + '</div>'; }).join('') : '') + '</div></div>';
+  return html;
+}
+
+/* ---- itemized: one row per PO line ---------------------------------- */
+function schItems() {
+  var it = epSchItemsInit(REC);
+  var lines = REC.items || [];
+  if (!lines.length) return '<div class="ep-card ep-empty"><div class="big">No PO lines on this record</div><div class="ep-sub">The itemized layout reads the order’s lines; this record was created before lines were carried. Start the demo again to get them.</div></div>';
+  var pr = epSchItemsProgress(REC) || { actual:0, planned:0 };
+  var per = 25, pages = Math.ceil(lines.length / per);
+  ITEM_PAGE = Math.min(ITEM_PAGE, pages - 1);
+  var slice = lines.slice(ITEM_PAGE * per, ITEM_PAGE * per + per);
+  var nSel = Object.keys(ITEM_SEL).filter(function (k) { return ITEM_SEL[k]; }).length;
+  var W = it.milestones.reduce(function (s, m) { return s + (+m.weight || 0); }, 0);
+  var html = '<div class="ep-note">Itemized schedule — the shape the reviewers ask for (“we need the schedule for each item, not per size”). One row per PO line; the columns are milestones with a weight. ' +
+    'Milestones marked H / W come from the ITP. Select lines and set a milestone’s planned / forecast / actual date for all of them at once.</div>';
+  html += '<div class="ep-kpis" style="grid-template-columns:repeat(4,1fr);">' +
+    '<div class="ep-kpi"><div class="k">Lines</div><div class="v">' + lines.length + '</div><div class="s">from the PO</div></div>' +
+    '<div class="ep-kpi"><div class="k">Milestones</div><div class="v">' + it.milestones.length + '</div><div class="s">weights total ' + W + '%' + (W !== 100 ? ' — should be 100' : '') + '</div></div>' +
+    '<div class="ep-kpi"><div class="k">Weighted progress</div><div class="v tabnum" style="color:' + (pr.actual < pr.planned ? '#e11d48' : '#0f766e') + ';">' + pr.actual + '% / ' + pr.planned + '%</div><div class="s">actual / planned today</div></div>' +
+    '<div class="ep-kpi"><div class="k">Selected</div><div class="v">' + nSel + '</div><div class="s">lines</div></div></div>';
+  html += '<div class="ep-card flush"><div class="ep-card-title"><span>Per PO line — page ' + (ITEM_PAGE + 1) + ' of ' + pages + '</span><span class="ep-row">' +
+    '<button class="ep-btn secondary sm" data-act="it-selpage">Select this page</button>' +
+    '<button class="ep-btn secondary sm" data-act="it-selnone">Clear selection</button>' +
+    '<button class="ep-btn primary sm" data-act="it-set"' + (nSel ? '' : ' disabled') + '>Set milestone dates (' + nSel + ')</button>' +
+    '<button class="ep-btn secondary sm" data-act="it-ms">Milestones & weights</button>' +
+    '<button class="ep-btn secondary sm" data-act="it-prev"' + (ITEM_PAGE ? '' : ' disabled') + '>←</button>' +
+    '<button class="ep-btn secondary sm" data-act="it-next"' + (ITEM_PAGE < pages - 1 ? '' : ' disabled') + '>→</button></span></div>';
+  html += '<div class="ep-gridwrap"><table class="ep-grid"><thead><tr><th></th><th>Item</th><th style="min-width:260px;">Description</th><th>Qty</th><th>Hold</th><th>Lot</th>' +
+    it.milestones.map(function (m) { return '<th title="weight ' + m.weight + '%">' + esc(m.label) + (m.tpi ? ' <span class="ep-chip ' + m.tpi + '">' + m.tpi + '</span>' : '') + '<div style="font-weight:600;text-transform:none;color:#94a3b8;">' + m.weight + '%</div></th>'; }).join('') +
+    '</tr></thead><tbody>';
+  slice.forEach(function (l) {
+    var c = it.cells[l.item] || {};
+    html += '<tr><td class="act"><input type="checkbox" data-isel="' + l.item + '"' + (ITEM_SEL[l.item] ? ' checked' : '') + ' style="width:auto;height:auto;"></td>' +
+      '<td class="ro tabnum">' + l.item + '</td><td class="t" style="font-size:11px;">' + esc(String(l.desc || '').slice(0, 90)) + '</td>' +
+      '<td class="ro tabnum">' + n(l.qty) + ' ' + esc(l.unit) + '</td><td class="ro tabnum">' + (l.hold ? n(l.hold) : '') + '</td><td class="ro">' + esc(l.lot) + '</td>' +
+      it.milestones.map(function (m) {
+        var v = c[m.key] || {};
+        return '<td class="ep-ms" data-icell="' + l.item + '|' + m.key + '">' + (v.a ? '<div class="a">✓ ' + fmtDate(v.a) + '</div>' : v.f ? '<div class="f">F ' + fmtDate(v.f) + '</div>' : '') + (v.p ? '<div class="p">P ' + fmtDate(v.p) + '</div>' : (v.a || v.f ? '' : '<div class="p">—</div>')) + '</td>';
+      }).join('') + '</tr>';
+  });
+  html += '</tbody></table></div><div class="ep-sub" style="padding:8px 16px;">P planned · F forecast · ✓ actual. Click a cell to date that line alone.</div></div>';
+  return html;
+}
+function itemSetModal(items, msKey) {
+  var it = epSchItemsInit(REC);
+  var one = items.length === 1 ? (it.cells[items[0]] || {})[msKey] || {} : {};
+  modal('Milestone dates — ' + items.length + ' line' + (items.length > 1 ? 's' : ''),
+    '<div class="ep-lbl">Milestone</div><select class="ep-sel" id="m-ms">' + it.milestones.map(function (m) { return '<option value="' + m.key + '"' + (m.key === msKey ? ' selected' : '') + '>' + esc(m.label) + ' (' + m.weight + '%)</option>'; }).join('') + '</select>' +
+    '<div class="ep-fields" style="grid-template-columns:repeat(3,1fr);margin-top:12px;">' +
+    '<div class="ep-f"><div class="k">Planned</div><input type="date" class="ep-in" id="m-p" value="' + (one.p || '') + '"></div>' +
+    '<div class="ep-f"><div class="k">Forecast</div><input type="date" class="ep-in" id="m-f" value="' + (one.f || '') + '"></div>' +
+    '<div class="ep-f"><div class="k">Actual</div><input type="date" class="ep-in" id="m-a" value="' + (one.a || '') + '"></div></div>' +
+    '<div class="ep-sub">Blank fields are left as they are' + (items.length === 1 ? '' : ' on every selected line') + '.</div>',
+    function () {
+      var k = $('m-ms').value;
+      ['p', 'f', 'a'].forEach(function (f) { var v = $('m-' + f).value; if (v || items.length === 1) epSchItemSet(REC, items, k, f, v, WHO(), SIDE()); });
+      saveRec(); closeModal(); render();
+    });
+}
+function milestonesModal() {
+  var it = epSchItemsInit(REC);
+  var draw = function () {
+    return it.milestones.map(function (m, i) {
+      return '<div class="ep-row" style="margin-bottom:6px;"><input class="ep-in" style="flex:1;margin:0;" data-msl="' + i + '" value="' + esc(m.label) + '">' +
+        '<input class="ep-in" style="width:70px;margin:0;" data-msw="' + i + '" value="' + m.weight + '" title="weight %">' +
+        '<select class="ep-sel" style="width:90px;margin:0;" data-mst="' + i + '"><option value="">—</option><option value="H"' + (m.tpi === 'H' ? ' selected' : '') + '>H hold</option><option value="W"' + (m.tpi === 'W' ? ' selected' : '') + '>W witness</option></select>' +
+        '<button class="ep-ico" data-msdel="' + i + '">✕</button></div>';
+    }).join('');
+  };
+  modal('Milestones & weights',
+    '<div class="ep-sub" style="margin-bottom:10px;">The columns of the itemized schedule. Weights add up to 100% and drive the weighted progress; H / W marks the ITP points.</div><div id="m-mss">' + draw() + '</div>' +
+    '<button class="ep-btn secondary sm" id="m-msadd">+ Add milestone</button>',
+    function () {
+      it.milestones.forEach(function (m, i) {
+        m.label = $('m-mss').querySelector('[data-msl="' + i + '"]').value.trim() || m.label;
+        m.weight = +$('m-mss').querySelector('[data-msw="' + i + '"]').value || 0;
+        m.tpi = $('m-mss').querySelector('[data-mst="' + i + '"]').value;
+      });
+      epSchLog(REC, { by:WHO(), side:SIDE(), act:'ms', txt:'Milestones / weights updated' });
+      saveRec(); closeModal(); render();
+    }, { wide:'wide' });
+  var rebind = function () {
+    $('m-mss').querySelectorAll('[data-msdel]').forEach(function (b) { b.onclick = function () { it.milestones.splice(+b.getAttribute('data-msdel'), 1); $('m-mss').innerHTML = draw(); rebind(); }; });
+  };
+  rebind();
+  $('m-msadd').onclick = function () { it.milestones.push({ key:'m' + epXId(), label:'New milestone', weight:0, tpi:'' }); $('m-mss').innerHTML = draw(); rebind(); };
+}
+
+/* ---- sub-orders with float (rule 3; annexure-2) ---------------------- */
+function schSubs() {
+  var subs = REC.sch.subs = REC.sch.subs || [];
+  var html = '<div class="ep-note">Each critical sub-order expanded separately (rule 3). Float = the date the material is required at the workshop minus the date it is expected there (forecast ex-works + transit). A negative float is the early warning.</div>';
+  html += '<div class="ep-card flush"><div class="ep-card-title"><span>Sub-orders — ' + subs.length + '</span><button class="ep-btn primary sm" data-act="sub-add">+ Add sub-order</button></div>';
+  if (!subs.length) return html + '<div class="ep-empty">No sub-orders recorded. The vendor lists them from the sub-order plan (Z002).</div></div>';
+  html += '<div class="ep-gridwrap"><table class="ep-table"><thead><tr><th>Material / equipment</th><th>Qty</th><th>Sub-vendor</th><th>AVL</th><th>Location</th><th>Insp. level</th><th>Sub-order no.</th>' +
+    '<th>Placement (plan / actual)</th><th>Lead (d)</th><th>Forecast ex-works</th><th>Transit (d)</th><th>Expected at works</th><th>Required at works</th><th>Float</th><th>Status / reason</th><th></th></tr></thead><tbody>' +
+    subs.map(function (s, i) {
+      var c = epSubCalc(s);
+      return '<tr><td><b>' + esc(s.name) + '</b></td><td class="tabnum">' + esc(s.qty || '') + '</td><td>' + esc(s.vendor || '') + '</td><td>' + esc(s.avl || '') + '</td><td>' + esc(s.loc || '') + '</td><td>' + esc(s.level || '') + '</td><td>' + esc(s.no || '') + '</td>' +
+        '<td class="tabnum">' + fmtDate(s.placePlan) + (s.placeAct ? '<br><b>' + fmtDate(s.placeAct) + '</b>' : '') + '</td><td class="tabnum">' + esc(s.lead || '') + '</td>' +
+        '<td class="tabnum">' + fmtDate(c.exw) + '</td><td class="tabnum">' + esc(s.transit || '') + '</td><td class="tabnum">' + fmtDate(c.expected) + '</td><td class="tabnum">' + fmtDate(s.required) + '</td>' +
+        '<td class="tabnum">' + (c.float == null ? '—' : '<span class="ep-pill ' + (c.float < 0 ? 'rose' : c.float < 7 ? 'warn' : 'teal') + ' sm">' + c.float + 'd</span>') + '</td>' +
+        '<td style="max-width:200px;">' + esc(s.status || '') + '</td><td><button class="ep-btn xs secondary" data-act="sub-edit" data-i="' + i + '">Edit</button></td></tr>';
+    }).join('') + '</tbody></table></div></div>';
+  return html;
+}
+function subModal(i) {
+  var subs = REC.sch.subs = REC.sch.subs || [];
+  var s = i >= 0 ? subs[i] : { name:'', qty:'', vendor:'', avl:'AVL', loc:'', level:'', no:'', placePlan:'', placeAct:'', lead:'', exwF:'', transit:'', required:'', status:'' };
+  var fld = function (k, label, type) { return '<div class="ep-f"><div class="k">' + label + '</div><input class="ep-in" id="s-' + k + '"' + (type ? ' type="' + type + '"' : '') + ' value="' + esc(s[k] || '') + '"></div>'; };
+  modal(i >= 0 ? 'Edit sub-order' : 'Add sub-order',
+    '<div class="ep-fields" style="grid-template-columns:repeat(3,1fr);">' +
+    fld('name', 'Material / equipment') + fld('qty', 'Qty') + fld('vendor', 'Selected sub-vendor') + fld('avl', 'AVL / Non-AVL') + fld('loc', 'Location') + fld('level', 'Inspection level') +
+    fld('no', 'Sub-order no. / ref') + fld('placePlan', 'Placement — planned', 'date') + fld('placeAct', 'Placement — actual', 'date') +
+    fld('lead', 'Lead time (days)') + fld('exwF', 'Forecast ex-works', 'date') + fld('transit', 'Transit incl. customs (days)') +
+    fld('required', 'Required at works (baseline)', 'date') + '</div>' +
+    '<div class="ep-lbl">Current status & reasons for delay</div><input class="ep-in" id="s-status" value="' + esc(s.status || '') + '">' +
+    '<div class="ep-sub" style="margin-top:8px;">Expected at works = forecast ex-works (or placement + lead time) + transit. Float = required − expected.</div>',
+    function () {
+      ['name', 'qty', 'vendor', 'avl', 'loc', 'level', 'no', 'placePlan', 'placeAct', 'lead', 'exwF', 'transit', 'required', 'status'].forEach(function (k) { s[k] = $('s-' + k).value.trim(); });
+      if (!s.name) return toast('Name the material.');
+      if (i < 0) subs.push(s);
+      epSchLog(REC, { by:WHO(), side:SIDE(), act:'sub', txt:(i < 0 ? 'Sub-order added: ' : 'Sub-order updated: ') + s.name });
+      saveRec(); closeModal(); render();
+    }, { wide:'wide' });
+}
+
+/* ---- issues & comments: each issue is the next revision of Z003 ------- */
+function schIssues() {
+  var is = REC.sch.issues;
+  var z = REC.reg && REC.reg.rows.find(function (r) { return r.code === 'Z003' && !r.deleted; });
+  var html = '<div class="ep-note">The schedule is itself a registered document — SDRL <b>Z003 Manufacturing Schedule</b>' + (z ? ' (' + esc(z.npcc) + ')' : '') + '. Each issue becomes the next revision on the register, and the reviewers’ comments and the vendor’s responses are kept with that revision.</div>';
+  if (!is.length) return html + '<div class="ep-card ep-empty"><div class="big">Not issued yet</div><div class="ep-sub">Use “Issue as Z003” on the activity schedule.</div></div>';
+  is.slice().reverse().forEach(function (i) {
+    html += '<div class="ep-card flush"><div class="ep-card-title"><span>Z003 Rev ' + i.rev + ' — ' + esc(i.desc) + ' · ' + fmtDT(i.on) + ' · ' + esc(i.by) + ' (' + i.side + ')</span>' +
+      (VIEW === 'npcc' ? '<button class="ep-btn secondary sm" data-act="crs-add" data-rev="' + i.rev + '">+ Comment (NMDC / ADNOC)</button>' : '') + '</div>' +
+      '<table class="ep-table"><thead><tr><th>S/L</th><th>Ref.</th><th>NMDC / ADNOC comment</th><th>Vendor response</th><th></th></tr></thead><tbody>' +
+      (i.comments.length ? i.comments.map(function (c) {
+        return '<tr><td>' + c.sl + '</td><td>' + esc(c.ref) + '</td><td>' + esc(c.comment) + '<div class="ep-sub">' + esc(c.by) + ' · ' + fmtDate(c.on) + '</div></td>' +
+          '<td>' + (c.response ? esc(c.response) + '<div class="ep-sub">' + esc(c.respBy) + ' · ' + fmtDate(c.respOn) + '</div>' : '<span class="ep-pill warn sm">open</span>') + '</td>' +
+          '<td>' + (VIEW === 'vendor' ? '<button class="ep-btn xs primary" data-act="crs-resp" data-rev="' + i.rev + '" data-sl="' + c.sl + '">Respond</button>' : '') + '</td></tr>';
+      }).join('') : '<tr><td colspan="5" class="ep-sub">No comments on this revision.</td></tr>') +
+      '</tbody></table><div class="ep-sub" style="padding:8px 16px;">Snapshot: ' + i.snap.length + ' rows · delivery ' + fmtDate((i.snap.filter(function (r) { return /^Delivered|^Exw|^FOB|^CFR/.test(r.act) && !r.na; }).map(function (r) { return r.fE || r.bE; }).filter(Boolean).sort().pop()) || '') + '</div></div>';
+  });
+  return html;
+}
+
+function schXlsx() {
+  var ex = REC.sch.cols || [];
+  var cols = [{ header:'Sr.', width:6 }].concat(EP_SCH_COLS.map(function (c) { return { header:c.label, width: Math.round(c.w / 7) }; }))
+    .concat(ex.map(function (e) { return { header:e.label + ' *', width:16 }; })).concat([{ header:'Remarks', width:30 }]);
+  var sr = 0;
+  var rows = epSchLive(REC).map(function (r) {
+    return [String(++sr)].concat(EP_SCH_COLS.map(function (c) { return r[c.key] == null ? '' : String(r[c.key]); }))
+      .concat(ex.map(function (e) { return r.x[e.key] || ''; })).concat([(r.na ? 'N/A — ' + r.na.why : '') + (r.itp ? ' ITP ' + r.itp : '') + (r.min ? '' : ' (added by ' + (r.by || 'NPCC') + ')')]);
+  });
+  var bytes = miniBuildXlsx({ sheetName:'Schedule', title:'Schedule — PO ' + REC.po + ' — ' + (REC.supplier || '') + (REC.sch.frozen ? ' — baseline frozen ' + fmtDate(REC.sch.frozen.on) : ' — baseline draft'), columns:cols, rows:rows });
+  downloadMiniXlsx(bytes, 'Schedule ' + REC.po + '.xlsx');
+}
+
+/* ==================================================== TAB: MANUFACTURING */
+function tabMfg() {
+  var m = REC.mfg || {};
+  var html = '<div class="ep-note">From the pre-inspection meeting at the supplier’s premises to the release note: fabrication, stage and external inspections, punch points and the IRN that releases the material. Sub-orders now sit on the Schedule tab, each with its float.</div>';
+  html += '<div class="ep-card"><div class="ep-card-title">Pre-inspection meeting (PIM)' + (m.pimOn ? '<span class="ep-pill teal sm">' + fmtDate(m.pimOn) + '</span>' : '') + '</div>' +
+    '<div class="ep-fields" style="grid-template-columns:repeat(2,1fr);">' + mf('PIM held on', m.pimOn ? fmtDate(m.pimOn) : '—') + mf('PIM notes', esc(m.pimNotes || '—')) + '</div>' +
+    '<button class="ep-btn ' + (m.pimOn ? 'secondary' : 'primary') + ' sm" data-act="pim">' + (m.pimOn ? 'Update PIM' : 'Record PIM') + '</button></div>';
+  html += '<div class="ep-card"><div class="ep-card-title">Fabrication & inspections</div>' +
+    '<div class="ep-fields" style="grid-template-columns:repeat(5,1fr);">' +
+    mf('Fabrication start', fmtDate(m.fabStart) || '—') + mf('Fabrication end', fmtDate(m.fabEnd) || '—') +
+    mf('External inspection', fmtDate(m.extInsp) || '—') + mf('Punch points closed', fmtDate(m.punch) || '—') + mf('IRN issued', fmtDate(m.irn) || '—') + '</div>' +
+    '<button class="ep-btn secondary sm" data-act="mfg-dates">Edit dates</button></div>';
+  return html;
+  function mf(k, v) { return '<div class="ep-f"><div class="k">' + k + '</div><div class="v tabnum">' + v + '</div></div>'; }
+}
+
+/* ==================================================== TAB: SHIPMENT */
+function tabShip() {
+  var s = REC.ship || {};
+  var html = '<div class="ep-note">From readiness at the works to the Material Receipt Voucher at stores. For imports the customs step matters — the origin and the incoterm say whose job each leg is.</div>';
+  html += '<div class="ep-card"><div class="ep-card-title">Dispatch & transit</div><div class="ep-fields" style="grid-template-columns:repeat(3,1fr);">' +
+    mf('Mode', esc(s.mode || '—')) + mf('AWB / BL no.', esc(s.docNo || '—')) + mf('Carrier / forwarder', esc(s.carrier || '—')) +
+    mf('ETD (despatch)', s.etd ? fmtDate(s.etd) : '—') + mf('ETA (arrival)', s.eta ? fmtDate(s.eta) : '—') + mf('Customs', esc(s.customs || '—')) + '</div>' +
+    '<button class="ep-btn secondary sm" data-act="ship">Edit shipment</button></div>';
+  html += '<div class="ep-card"><div class="ep-card-title">Receipt at stores' + (s.mrvOn ? '<span class="ep-pill teal sm">MRV ' + fmtDate(s.mrvOn) + '</span>' : '<span class="ep-pill warn sm">not received</span>') + '</div>' +
+    '<div class="ep-fields" style="grid-template-columns:repeat(3,1fr);">' + mf('MRV number', esc(s.mrvNo || '—')) + mf('MRV date', s.mrvOn ? fmtDate(s.mrvOn) : '—') + mf('Quantity received', esc(s.mrvQty || '—')) + '</div>' +
+    (s.mrvOn ? '' : '<button class="ep-btn primary sm" data-act="mrv">Record MRV</button>') + '</div>';
+  return html;
+  function mf(k, v) { return '<div class="ep-f"><div class="k">' + k + '</div><div class="v">' + v + '</div></div>'; }
+}
+
+/* ==================================================== TAB: CLOSEOUT */
+function tabClose() {
+  var c = REC.close || {}, closed = epExpIsClosed(REC);
+  var html = '<div class="ep-note">An order closes on its databook: the MRB submitted by the supplier and approved by the custodians. LD settlement is tracked with the commercial team but is not the closure gate.</div>';
+  if (closed) html += '<div class="ep-note" style="background:#ecfdf5;border-color:#a7f3d0;border-left-color:#059669;color:#065f46;">This order is <b>closed</b> — MRB approved on ' + fmtDate(c.mrbApprOn) + '.</div>';
+  html += '<div class="ep-card"><div class="ep-card-title">Databook / MRB' + (closed ? '' : '<span class="ep-pill warn sm">open</span>') + '</div>' +
+    '<div class="ep-fields" style="grid-template-columns:repeat(2,1fr);">' + mf('MRB submitted', c.mrbSubOn ? fmtDate(c.mrbSubOn) : '—') + mf('MRB approved', c.mrbApprOn ? fmtDate(c.mrbApprOn) : '—') + '</div>';
+  if (!closed) html += '<div class="ep-row">' + (c.mrbSubOn ? '' : '<button class="ep-btn primary sm" data-act="mrb-sub" id="mrb-sub">Record MRB submission</button>') +
+    (c.mrbSubOn && !c.mrbApprOn ? '<button class="ep-btn primary sm" data-act="mrb-appr" id="mrb-appr">Record MRB approval — closes the order</button>' : '') + '</div>';
+  html += '</div>';
+  var st = epRegStats(REC);
+  var delivered = epExpStageIndex(REC.stage) >= epExpStageIndex('delivered');
+  var items = [
+    { ok: !!REC.ackDate, t: 'Order acknowledged by the vendor' },
+    { ok: st.total > 0 && st.submitted === st.total, t: 'Vendor data register complete — ' + st.submitted + ' of ' + st.total + ' submitted' },
+    { ok: !!((REC.mfg||{}).irn), t: 'IRN issued — material released by inspection' },
+    { ok: delivered, t: 'Delivered — MRV raised at stores' },
+    { ok: !!c.mrbSubOn, t: 'Databook (MRB) submitted by the supplier' },
+    { ok: !!c.mrbApprOn, t: 'MRB approved by the custodians' },
+  ];
+  html += '<div class="ep-card"><div class="ep-card-title">Closeout checklist</div>' + items.map(function (x) {
+    return '<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #f1f5f9;"><span style="flex-shrink:0;width:20px;height:20px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;' +
+      (x.ok ? 'background:#d1fae5;color:#065f46;' : 'background:#f1f5f9;color:#94a3b8;') + '">' + (x.ok ? '✓' : '·') + '</span><span class="ep-sub">' + esc(x.t) + '</span></div>';
+  }).join('') + '</div>';
+  return html;
+  function mf(k, v) { return '<div class="ep-f"><div class="k">' + k + '</div><div class="v tabnum">' + v + '</div></div>'; }
+}
+
+/* ==================================================== TAB: FOLLOW-UP LOG */
+function tabLog() {
+  var entries = REC.log || [];
+  var html = '<div class="ep-note">The chase itself, on the record: every contact with the vendor, what was promised and by when. Letter, replies, register and schedule events land here too.</div>';
+  html += '<div class="ep-card flush"><div class="ep-card-title">Follow-up log<button class="ep-btn sm primary" data-act="log-add" id="log-add">Add follow-up</button></div>';
+  html += entries.length ? '<table class="ep-table"><thead><tr><th>When</th><th>By</th><th>What was done / promised</th></tr></thead><tbody>' +
+    entries.slice().reverse().map(function (e) { return '<tr><td class="tabnum" style="white-space:nowrap;">' + fmtDT(e.on) + '</td><td style="white-space:nowrap;">' + esc(e.by) + '</td><td>' + esc(e.txt) + '</td></tr>'; }).join('') + '</tbody></table>'
+    : '<div class="ep-empty">No follow-ups recorded yet.</div>';
+  return html + '</div>';
+}
+
+/* ------------------------------------------------------------- RENDER */
+function render() {
+  loadRec();
+  if (!REC) {
+    $('content').innerHTML = '<div class="ep-card ep-empty"><div class="big">Order not found</div><div>No expediting record for this PO. It is created when the buyer presses “Notify Expediting” on the issued order.</div></div>';
+    $('tabs').innerHTML = ''; return;
+  }
+  var ven = VIEW === 'vendor';
+  $('portal-band').hidden = !ven;
+  if (ven) $('portal-band').innerHTML = '<b>Supplier Portal</b> · ' + esc(REC.supplier) + ' · PO ' + esc(REC.po) + ' <span style="opacity:.75;">— the expediting part of the portal: answer the letter, keep your document register and your schedule. NMDC sees every change.</span>';
+  $('letter-btn').hidden = ven;
+  $('rail-wrap').hidden = ven;
+  $('view-npcc').textContent = 'NPCC — ' + (REC.assignedTo || EP_EXP_MANAGER);
+  document.querySelectorAll('#view-seg button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-view') === VIEW); });
+  $('title').textContent = REC.po + ' — ' + (REC.supplierShort || REC.supplier);
+  $('sub').textContent = 'MR ' + REC.mrRef + ' · Project ' + REC.project + ' · ' + REC.head + ' · ' + money(REC.value) + (REC.assignedTo ? ' · Expeditor: ' + REC.assignedTo : '');
+  rail();
+  renderTabs();
+  var fn = { head:tabHead, mr:tabMr, docs:tabDocs, sched:tabSched, mfg:tabMfg, ship:tabShip, close:tabClose, log:tabLog, letter:tabLetter }[TAB];
+  var sx = window.scrollY;
+  $('content').innerHTML = fn();
+  window.scrollTo(0, sx);
+}
+
+/* ------------------------------------------------------------- MODAL */
+function modal(title, bodyHtml, onOk, opts) {
+  opts = opts || {};
+  $('modal-title').textContent = title;
+  $('modal-body').innerHTML = bodyHtml;
+  $('modal-box').className = 'ep-modal' + (opts.wide ? ' ' + opts.wide : '');
+  $('modal-foot').innerHTML = opts.foot || '<button class="ep-btn secondary" id="modal-cancel">Cancel</button><button class="ep-btn primary" id="modal-ok">' + (opts.ok || 'OK') + '</button>';
+  if ($('modal-cancel')) $('modal-cancel').onclick = closeModal;
+  if ($('modal-ok')) $('modal-ok').onclick = function () { if (MODAL_OK) MODAL_OK(); };
+  $('modal-bg').hidden = false;
+  MODAL_OK = onOk;
+}
+function closeModal() { $('modal-bg').hidden = true; MODAL_OK = null; }
+function ask(title, sub, label, onOk, preset) {
+  modal(title, '<div class="ep-sub" style="margin-bottom:10px;">' + sub + '</div><div class="ep-lbl">' + label + '</div><input class="ep-in" id="m-ask" value="' + esc(preset || '') + '">',
+    function () { var v = $('m-ask').value.trim(); if (!v) return toast(label + ' — required.'); onOk(v); });
+  setTimeout(function () { var i = $('m-ask'); if (i) i.focus(); }, 30);
+}
+
+/* ------------------------------------------------------------- WIRING
+   One delegated listener for clicks and one for edits — the content is
+   re-rendered after every change. */
+$('content').addEventListener('click', function (ev) {
+  var t = ev.target.closest('[data-act],[data-sub],[data-page],[data-icell]');
+  if (!t || !REC) return;
+  if (t.hasAttribute('data-sub')) { SUB.sched = t.getAttribute('data-sub'); render(); return; }
+  if (t.hasAttribute('data-page')) { pageModal(+t.getAttribute('data-page')); return; }
+  if (t.hasAttribute('data-icell')) { var p = t.getAttribute('data-icell').split('|'); itemSetModal([+p[0]], p[1]); return; }
+  var a = t.getAttribute('data-act'), id = t.getAttribute('data-id');
+  switch (a) {
+    case 'letter': return letterModal();
+    case 'kickoff': return kickoffModal();
+    case 'mr-read': return mrReadModal();
+    case 'mr-checked':
+      REC.mrStudy = REC.mrStudy || {}; REC.mrStudy.checkedOn = today(); REC.mrStudy.checkedBy = WHO();
+      addLog('MR attachments (ITR / SDR) checked by eye.'); saveRec(); render(); return;
+    case 'study': return studyModal();
+    case 'reg-go': TAB = 'docs'; render(); return;
+    case 'reg-create': {
+      var k = epRegCreateFromSdr(REC, WHO(), SIDE());
+      addLog('Vendor data register created from the MR’s SDR — ' + k + ' row(s).');
+      saveRec(); render(); toast(k ? k + ' row(s) created from the SDR.' : 'Every SDR code is already on the register.'); return;
+    }
+    case 'reg-add': return regAddModal();
+    case 'reg-col': return ask('Add a column', 'Extra columns are kept apart from the fixed format (marked *), so the register stays comparable across orders.', 'Column name', function (v) {
+      epRegAddColumn(REC, v, WHO(), SIDE()); saveRec(); closeModal(); render(); });
+    case 'reg-cols': return regColsModal();
+    case 'reg-xlsx': downloadMiniXlsx(epRegXlsxBytes(REC), (epExpClientKind(REC) === 'adnoc' ? 'VDR ' : 'SDR ') + REC.po + '.xlsx'); toast('Downloaded — tagged with PO and register version.'); return;
+    case 'reg-up': $('file-xlsx').value = ''; $('file-xlsx').click(); return;
+    case 'reg-del': return ask('Delete a row', 'The row stays on the register, struck through, with your reason.', 'Reason', function (v) {
+      var r = epRegDelete(REC, id, WHO(), SIDE(), v); if (!r.ok) return toast(r.msg || 'Not deleted.'); saveRec(); closeModal(); render(); });
+    case 'reg-restore': epRegRestore(REC, id, WHO(), SIDE()); saveRec(); render(); return;
+    case 'reg-route': return regRouteModal(id);
+    case 'reply': return sendReply(t.getAttribute('data-key'));
+    /* schedule */
+    case 'sch-add': return ask('Add an activity', 'Added at the end; use + on a row to insert below it.', 'Activity', function (v) { epSchAdd(REC, null, v, WHO(), SIDE()); saveRec(); closeModal(); render(); });
+    case 'sch-ins': return ask('Insert an activity below', 'e.g. a critical sub-order, a stage inspection, a document approval.', 'Activity', function (v) { epSchAdd(REC, id, v, WHO(), SIDE()); saveRec(); closeModal(); render(); });
+    case 'sch-col': return ask('Add a column', 'e.g. Responsible party, Location, Heat number — kept as a marked extra column.', 'Column name', function (v) { epSchAddColumn(REC, v, WHO(), SIDE()); saveRec(); closeModal(); render(); });
+    case 'sch-del': return ask('Delete an activity', 'It stays visible, struck through, with your reason.', 'Reason', function (v) { var r = epSchDelete(REC, id, WHO(), SIDE(), v); if (!r.ok) return toast(r.msg); saveRec(); closeModal(); render(); });
+    case 'sch-na': {
+      var row = epSchFind(REC, id);
+      if (row.na) { epSchSetNa(REC, id, '', WHO(), SIDE()); saveRec(); render(); return; }
+      return ask('Not applicable — ' + row.act, 'A minimum-requirement row cannot be deleted; it is marked not applicable with the reason.', 'Reason', function (v) { epSchSetNa(REC, id, v, WHO(), SIDE()); saveRec(); closeModal(); render(); }, t.getAttribute('data-why') || '');
+    }
+    case 'sch-itp': { var k2 = epSchAddItp(REC, WHO(), SIDE()); saveRec(); render(); toast(k2 + ' ITP hold / witness point(s) added before FAT / Inspection.'); return; }
+    case 'sch-freeze':
+      return modal('Accept the schedule and freeze the baseline', '<div class="ep-sub">From now on the baseline start / end dates do not change (rule 2). The vendor moves the forecast, and every move needs its dependency. Only a signed re-baseline can open the baseline again.</div>', function () {
+        epSchFreeze(REC, WHO()); addLog('Schedule accepted — baseline frozen.'); saveRec(); closeModal(); render(); }, { ok:'Accept & freeze' });
+    case 'sch-rebase':
+      return modal('Re-baseline — a signed step', '<div class="ep-sub" style="margin-bottom:10px;">Opens the baseline for editing. It is recorded with the reason and the signature, and the old baseline is kept.</div>' +
+        '<div class="ep-lbl">Reason</div><input class="ep-in" id="m-why" placeholder="Client-approved change order CO-03 moved the delivery by 6 weeks">' +
+        '<div class="ep-lbl" style="margin-top:10px;">Signed by</div><select class="ep-sel" id="m-sig"><option>' + esc(EP_EXP_MANAGER) + ' — Expediting Manager</option><option>Sherife Aboelgheit — Senior Expediting Manager</option></select>',
+        function () { var w = $('m-why').value.trim(); if (!w) return toast('Give the reason.');
+          epSchRebaseline(REC, $('m-sig').value.split(' — ')[0], w); addLog('Re-baseline opened — ' + w); saveRec(); closeModal(); render(); }, { ok:'Sign & open the baseline' });
+    case 'sch-issue':
+      return ask('Issue the schedule as Z003', 'It becomes the next revision of Z003 Manufacturing Schedule on the register (revision and actual date set), with a snapshot for comments.', 'Description', function (v) {
+        var r = epSchIssue(REC, WHO(), SIDE(), v); addLog('Schedule issued as ' + r.npcc + ' Rev ' + r.rev + ' — ' + v + '.'); saveRec(); closeModal(); SUB.sched = 'issues'; render(); }, 'Issued for Review');
+    case 'sch-xlsx': return schXlsx();
+    case 'it-selpage': (REC.items || []).slice(ITEM_PAGE * 25, ITEM_PAGE * 25 + 25).forEach(function (l) { ITEM_SEL[l.item] = true; }); render(); return;
+    case 'it-selnone': ITEM_SEL = {}; render(); return;
+    case 'it-set': return itemSetModal(Object.keys(ITEM_SEL).filter(function (k) { return ITEM_SEL[k]; }).map(Number), epSchItemsInit(REC).milestones[0].key);
+    case 'it-ms': return milestonesModal();
+    case 'it-prev': ITEM_PAGE = Math.max(0, ITEM_PAGE - 1); render(); return;
+    case 'it-next': ITEM_PAGE++; render(); return;
+    case 'sub-add': return subModal(-1);
+    case 'sub-edit': return subModal(+t.getAttribute('data-i'));
+    case 'crs-add':
+      return modal('Comment on Z003 Rev ' + t.getAttribute('data-rev'), '<div class="ep-lbl">Ref. (page / item)</div><input class="ep-in" id="m-ref" placeholder="Page 3">' +
+        '<div class="ep-lbl" style="margin-top:10px;">NMDC / ADNOC comment</div><textarea class="ep-ta" id="m-cm" placeholder="We need the manufacturing schedule for each item, not per size."></textarea>',
+        function () { var c = $('m-cm').value.trim(); if (!c) return; epSchComment(REC, +t.getAttribute('data-rev'), $('m-ref').value.trim(), c, WHO()); saveRec(); closeModal(); render(); });
+    case 'crs-resp':
+      return ask('Vendor response', 'Your answer to the comment — kept with this revision.', 'Response', function (v) {
+        epSchRespond(REC, +t.getAttribute('data-rev'), +t.getAttribute('data-sl'), v, WHO()); saveRec(); closeModal(); render(); });
+    /* manufacturing / shipment / closeout / log */
+    case 'pim': return pimModal();
+    case 'mfg-dates': return mfgDatesModal();
+    case 'ship': return shipModal();
+    case 'mrv': return mrvModal();
+    case 'mrb-sub':
+      return modal('MRB submission', '<div class="ep-lbl">Submitted on</div><input type="date" id="m-in" class="ep-in" value="' + today() + '">', function () {
+        REC.close = REC.close || {}; REC.close.mrbSubOn = $('m-in').value || today(); setStage('mrbSub'); addLog('Databook (MRB) submitted.'); saveRec(); closeModal(); render(); });
+    case 'mrb-appr':
+      return modal('MRB approval — closes the order', '<div class="ep-sub" style="margin-bottom:10px;">Approving the databook is the closure gate. The order will read Closed.</div><div class="ep-lbl">Approved on</div><input type="date" id="m-in" class="ep-in" value="' + today() + '">', function () {
+        REC.close.mrbApprOn = $('m-in').value || today(); setStage('closed'); addLog('Databook (MRB) approved — order closed.'); saveRec(); closeModal(); render(); });
+    case 'log-add':
+      return modal('Add follow-up', '<div class="ep-lbl">What was done / promised</div><textarea id="m-txt" class="ep-ta" placeholder="Called the vendor — datasheets promised by 21-Oct…"></textarea>', function () {
+        var v = $('m-txt').value.trim(); if (!v) return; addLog(v); saveRec(); closeModal(); render(); });
+  }
+});
+/* edits in the grids — committed on change (leaving the cell) */
+$('content').addEventListener('change', function (ev) {
+  var el = ev.target;
+  if (el.hasAttribute('data-isel')) { ITEM_SEL[el.getAttribute('data-isel')] = el.checked; render(); return; }
+  if (!el.hasAttribute('data-cell')) return;
+  var tr = el.closest('tr[data-row]'); if (!tr) return;
+  var id = tr.getAttribute('data-row'), field = el.getAttribute('data-cell');
+  var grid = el.closest('table').id;
+  if (grid === 'reg-grid') {
+    var r = epRegSet(REC, id, field, el.value, WHO(), SIDE());
+    if (!r.ok) { toast(r.msg); render(); return; }
+    if (field === 'actual' && el.value) setStage('docsIn');
+    saveRec(); render(); return;
+  }
+  if (grid === 'sch-grid') {
+    var res = epSchSet(REC, id, field, el.value, WHO(), SIDE());
+    if (!res.ok && res.need === 'reason') {
+      var v = el.value;
+      return ask('The forecast moved — why?', 'The baseline is frozen. A forecast that moves needs its dependency: a manufacturing constraint, an approval waiting on our engineering, whatever the real reason is.', 'Dependency', function (why) {
+        epSchSet(REC, id, field, v, WHO(), SIDE(), why); saveRec(); closeModal(); render(); });
+    }
+    if (!res.ok) { toast(res.msg); render(); return; }
+    saveRec(); render();
+  }
+});
+$('file-xlsx').addEventListener('change', function () { if (this.files[0]) regUpload(this.files[0]); });
+
+/* ---------------------------------------------------------- MODALS kept from the first build */
+function studyModal() {
+  var st = REC.mrStudy = REC.mrStudy || {};
+  modal('The study — before the kickoff',
+    '<div class="ep-sub" style="margin-bottom:12px;">What the PO and the MR require. PIM, hold points and the documents are read from the ITR / SDR above; record what they do not say.</div>' +
+    '<div class="ep-fields" style="grid-template-columns:repeat(2,1fr);">' +
+    '<div class="ep-f"><div class="k">Payment terms</div><input id="m-pay" class="ep-in" value="' + esc(st.payment || REC.payment || '') + '"></div>' +
+    '<div class="ep-f"><div class="k">Bank guarantee (PBG / ABG)</div><input id="m-bg" class="ep-in" value="' + esc(st.bg || '') + '" placeholder="PBG 10% — due 30 days from PO"></div></div>' +
+    '<div class="ep-lbl">Study notes</div><textarea id="m-notes" class="ep-ta">' + esc(st.notes || '') + '</textarea>',
+    function () {
+      st.done = true; st.on = today(); st.payment = $('m-pay').value.trim(); st.bg = $('m-bg').value.trim(); st.notes = $('m-notes').value.trim();
+      addLog('PO & MR studied — ready for the kickoff.'); saveRec(); closeModal(); render();
+    });
+}
+function kickoffModal() {
+  modal(REC.kickoffOn ? 'Update kickoff meeting' : 'Record kickoff meeting',
+    '<div class="ep-sub" style="margin-bottom:12px;">At the kickoff the supplier is asked for the documents on the SDR. Recording it moves the order to Docs Requested.</div>' +
+    '<div class="ep-lbl">Held on</div><input type="date" id="m-on" class="ep-in" value="' + (REC.kickoffOn || today()) + '">' +
+    '<div class="ep-lbl" style="margin-top:12px;">Notes — who attended, what was agreed</div><textarea id="m-notes" class="ep-ta">' + esc(REC.kickoffNotes || '') + '</textarea>',
+    function () {
+      REC.kickoffOn = $('m-on').value || today(); REC.kickoffNotes = ($('m-notes').value || '').trim();
+      setStage('docsOut'); addLog('Kickoff meeting held — document request issued.'); saveRec(); closeModal(); render();
+    });
+}
+function pimModal() {
+  var m = REC.mfg = REC.mfg || {};
+  modal('Record PIM', '<div class="ep-sub" style="margin-bottom:12px;">The pre-inspection meeting at the supplier’s premises — the inspection plan is agreed here (4 weeks’ notice, hold for NMDC and Company on 74259).</div>' +
+    '<div class="ep-lbl">Held on</div><input type="date" id="m-on" class="ep-in" value="' + (m.pimOn || today()) + '">' +
+    '<div class="ep-lbl" style="margin-top:12px;">Notes</div><textarea id="m-notes" class="ep-ta">' + esc(m.pimNotes || '') + '</textarea>',
+    function () { m.pimOn = $('m-on').value || today(); m.pimNotes = $('m-notes').value.trim(); setStage('pim'); addLog('PIM held at the supplier’s premises.'); saveRec(); closeModal(); render(); });
+}
+function mfgDatesModal() {
+  var m = REC.mfg = REC.mfg || {};
+  var d = function (k, id, v) { return '<div class="ep-f"><div class="k">' + k + '</div><input type="date" id="' + id + '" class="ep-in" value="' + esc(v || '') + '"></div>'; };
+  modal('Fabrication & inspection dates', '<div class="ep-fields" style="grid-template-columns:repeat(2,1fr);">' +
+    d('Fabrication start', 'm-fs', m.fabStart) + d('Fabrication end', 'm-fe', m.fabEnd) + d('External inspection', 'm-ei', m.extInsp) + d('Punch points closed', 'm-pn', m.punch) + d('IRN issued', 'm-irn', m.irn) + '</div>' +
+    '<div class="ep-sub">Fabrication start moves the order to In Manufacture; the IRN moves it to Ready for Dispatch.</div>',
+    function () {
+      m.fabStart = $('m-fs').value; m.fabEnd = $('m-fe').value; m.extInsp = $('m-ei').value; m.punch = $('m-pn').value; m.irn = $('m-irn').value;
+      if (m.fabStart) setStage('fab'); if (m.extInsp) setStage('insp'); if (m.irn) setStage('release');
+      saveRec(); closeModal(); render();
+    });
+}
+function shipModal() {
+  var s = REC.ship = REC.ship || {};
+  var i = function (k, id, v, type) { return '<div class="ep-f"><div class="k">' + k + '</div><input' + (type ? ' type="' + type + '"' : '') + ' id="' + id + '" class="ep-in" value="' + esc(v || '') + '"></div>'; };
+  modal('Edit shipment', '<div class="ep-fields" style="grid-template-columns:repeat(2,1fr);">' +
+    i('Mode', 'm-mode', s.mode) + i('AWB / BL no.', 'm-docno', s.docNo) + i('Carrier / forwarder', 'm-carrier', s.carrier) + i('Customs', 'm-customs', s.customs) +
+    i('ETD (despatch)', 'm-etd', s.etd, 'date') + i('ETA (arrival)', 'm-eta', s.eta, 'date') + '</div><div class="ep-sub">The ETD moves the order to Shipped.</div>',
+    function () {
+      s.mode = $('m-mode').value; s.docNo = $('m-docno').value; s.carrier = $('m-carrier').value; s.customs = $('m-customs').value; s.etd = $('m-etd').value; s.eta = $('m-eta').value;
+      if (s.etd) setStage('shipped'); saveRec(); closeModal(); render();
+    });
+}
+function mrvModal() {
+  var s = REC.ship = REC.ship || {};
+  modal('Record MRV — material receipt voucher', '<div class="ep-sub" style="margin-bottom:12px;">Stores raise the MRV when the material lands. This moves the order to Delivered.</div>' +
+    '<div class="ep-fields" style="grid-template-columns:repeat(3,1fr);">' +
+    '<div class="ep-f"><div class="k">MRV number</div><input id="m-no" class="ep-in" value="' + esc(s.mrvNo || '') + '"></div>' +
+    '<div class="ep-f"><div class="k">MRV date</div><input type="date" id="m-on" class="ep-in" value="' + today() + '"></div>' +
+    '<div class="ep-f"><div class="k">Qty received</div><input id="m-qty" class="ep-in" value="' + esc(s.mrvQty || '') + '"></div></div>',
+    function () { s.mrvNo = $('m-no').value.trim(); s.mrvOn = $('m-on').value || today(); s.mrvQty = $('m-qty').value.trim(); setStage('delivered'); addLog('MRV raised — material received at stores.'); saveRec(); closeModal(); render(); });
+}
+
+/* --------------------------------------------------------------- INIT */
+$('back').addEventListener('click', function () {
+  if (window.parent !== window) window.parent.postMessage({ epNav:'expediting', url:'expediting.html' }, '*');
+  else window.location.href = 'expediting.html';
+});
+$('letter-btn').addEventListener('click', function () { if (REC) letterModal(); });
+$('log-btn').addEventListener('click', function () { if (REC) changeLogModal(); });
+$('tabs').addEventListener('click', function (ev) {
+  var t = ev.target.closest('[data-tab]'); if (!t) return;
+  TAB = t.getAttribute('data-tab'); render();
+});
+$('view-seg').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-view]'); if (!b) return;
+  VIEW = b.getAttribute('data-view'); TAB = VIEW === 'vendor' ? (REC && REC.intro ? 'letter' : 'docs') : 'head'; render();
+});
+
+PO = qs('po');
+if (qs('view') === 'vendor') VIEW = 'vendor';
+if (qs('tab')) TAB = qs('tab');
+if (typeof epOnStateChange === 'function') epOnStateChange(function () {
+  /* another pane moved this record; refresh quietly unless a pop-up is open */
+  if (!$('modal-bg').hidden) return;
+  var a = document.activeElement;
+  if (a && a.closest && a.closest('#content') && /INPUT|SELECT|TEXTAREA/.test(a.tagName)) return;
+  render();
+});
+render();
+</script>
+</body>
+</html>

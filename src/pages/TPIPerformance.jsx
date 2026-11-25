@@ -1,16 +1,21 @@
 import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
-import { supabase } from "@/api/supabaseClient";
 import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Building2, Award, TrendingUp } from "lucide-react";
 import TPIKPIs from "../components/tpi/TPIKPIs";
 import { Badge } from "@/components/ui/badge";
+import { useProject } from "@/components/context/ProjectContext";
 
 export default function TPIPerformance() {
+  const { selectedProjectId } = useProject();
   const [selectedAgency, setSelectedAgency] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
+
+  useEffect(() => {
+    setSelectedAgency(null);
+  }, [selectedProjectId]);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -24,16 +29,16 @@ export default function TPIPerformance() {
     fetchUser();
   }, []);
 
-  // NEW: Single query to materialized view (replaces 3 queries + aggregation)
+  // Query backend performance endpoint strictly scoped by selected project
   const { data: tpiPerformance = [], isLoading } = useQuery({
-    queryKey: ["tpi_performance_dashboard"],
+    queryKey: ["tpi_performance_dashboard", selectedProjectId || "all"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('tpi_performance_dashboard')
-        .select('*')
-        .order('avg_overall_score', { ascending: false });
-
-      if (error) throw error;
+      const backendUrl = import.meta.env.VITE_CSHARP_API_URL || 'https://localhost:5214/api';
+      const response = await fetch(
+        `${backendUrl}/TpiAgencies/performance?project_id=${encodeURIComponent(selectedProjectId || "all")}`
+      );
+      if (!response.ok) throw new Error('Failed to fetch TPI performance data');
+      const data = await response.json();
       return data || [];
     },
     initialData: [],
@@ -47,19 +52,31 @@ export default function TPIPerformance() {
   });
 
   // Fetch inspections and reviews for selected agency details
-  const { data: inspections = [] } = useQuery({
+  const { data: rawInspections = [] } = useQuery({
     queryKey: ["inspections"],
     queryFn: () => base44.entities.Inspection.list("-created_at"),
     initialData: [],
     enabled: !!selectedAgency, // Only fetch when agency selected
   });
 
-  const { data: reviews = [] } = useQuery({
+  const { data: rawReviews = [] } = useQuery({
     queryKey: ["reviews"],
     queryFn: () => base44.entities.InspectionReview.list(),
     initialData: [],
     enabled: !!selectedAgency, // Only fetch when agency selected
   });
+
+  const inspections = React.useMemo(() => {
+    if (!selectedProjectId || selectedProjectId === "all") return rawInspections;
+    const pid = String(selectedProjectId).toLowerCase();
+    return rawInspections.filter((i) => String(i.project_id || "").toLowerCase() === pid);
+  }, [rawInspections, selectedProjectId]);
+
+  const reviews = React.useMemo(() => {
+    if (!selectedProjectId || selectedProjectId === "all") return rawReviews;
+    const allowedIds = new Set(inspections.map((i) => i.id));
+    return rawReviews.filter((r) => allowedIds.has(r.inspection_id));
+  }, [rawReviews, inspections, selectedProjectId]);
 
   // Auto-select first agency
   useEffect(() => {

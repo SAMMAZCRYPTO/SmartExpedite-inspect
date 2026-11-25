@@ -1,321 +1,98 @@
-# InspectFlow - Supabase Migration
+# InspectFlow + SmartExpedit — EPC Expediting & Quality Inspection ERP
 
-InspectFlow is a comprehensive inspection management platform with **Supabase** as the backend.
+InspectFlow + SmartExpedit is a full-stack **EPC Contractor Procurement Expediting, Vendor Collaboration & Quality Inspection Platform** built with **React (Vite + Tailwind + shadcn/ui)** and **Python FastAPI + SQLite/SQLAlchemy**.
 
-## 🚀 Quick Start
+---
 
-### Prerequisites
+## Key Capabilities
 
-- **Docker Desktop** (required for local Supabase)
-- **Node.js** v16 or higher
-- **npm** or **yarn**
+- **Inspection Management (IMS):** NOI upload & AI PDF/OCR extraction, registered TPI inspector assignment & attendance check-in/check-out, IE report review & endorsement, NCR / finding tracking, and gated IRC/IRN release.
+- **Vendor Portal:** Multi-item NOI submission, schedule upload & parsing (`.xlsx`, `.csv`, `.pdf` via Gemini AI + OCR fallback), PO acknowledgement, Critical Sub-Order declaration & 1-click Sub-Order NOI, 7-section NMDC Progress Reports (`.docx` / `.pdf` export), Dispatch requests, and MRB/SPIR/MNCR closeout.
+- **Expediting ERP Workbench:**
+  - NEAS item-level tracking & PO schedule archetypes (`bulk`, `tagged`, `package`)
+  - 9-column Minimum Requirement Schedule with server baseline freeze & `.xlsx` export
+  - Client IAP approval gate, KOM/Tech/PIM Meeting MOMs + Auto-RAIL action items
+  - Rolling Client Inspection Look-Ahead Schedule (`14d` / `28d` / `60d`) + `.xlsx` export
+  - Chain-of-custody delivery staging (Ex-Works → In-Transit → Stores MRV / Stamped DN → MNCR return/rectify/close)
+  - Two-stage commercial closeout (LD assessment, Waiver Memo `.docx` export, Final Invoice)
+  - Project-wide Consolidated Weekly MSSR (4-sheet `.xlsx`) & Governance Registers
+  - AI Agents for PO/MR requirements review & First Expediting Contact drafting
 
-### 1. Install Dependencies
+---
 
+## Prerequisites
+
+- **Python** `3.10+`
+- **Node.js** `18+` and **npm**
+- *(Optional)* A **Google Gemini API key** (`GEMINI_API_KEY`) for AI PDF NOI/schedule extraction and PO/MR review agents (non-AI workflows, Excel/CSV parsers, and OCR fallback work without it).
+
+---
+
+## Quick Start (Local Development)
+
+### 1. Clone the repository
 ```bash
+git clone https://github.com/SAMMAZCRYPTO/SmartExpedite-inspect.git
+cd SmartExpedite-inspect
+```
+
+### 2. Configure environment variables
+Copy the example template (never commit `.env` or secrets):
+```powershell
+# Windows (PowerShell)
+Copy-Item .env.example .env
+```
+```bash
+# macOS / Linux
+cp .env.example .env
+```
+Edit `.env` and optionally add your `GEMINI_API_KEY=...`. For local testing, `.env.example` sets `AUTH_MODE=dev`, which seeds starter demo accounts cleanly on an empty database and enables one-click role switching at `/login`.
+
+> **Automated Windows setup:** You can run `.\setup.ps1` in PowerShell to verify Python/Node, create `.env`, install dependencies, and build `dist/` automatically.
+
+### 3. Install dependencies & build the frontend
+```bash
+pip install -r requirements.txt
 npm install
-```
-
-### 2. Start Supabase Locally
-
-```bash
-# First time setup - this will download Docker images
-npx supabase start
-
-# This will output your Anon Key - copy it!
-```
-
-### 3. Configure Environment
-
-Create a `.env.local` file in the project root:
-
-```env
-VITE_SUPABASE_URL=http://localhost:54321
-VITE_SUPABASE_ANON_KEY=<paste-your-anon-key-here>
-```
-
-### 4. Run Development Server
-
-```bash
-npm run dev
-```
-
-Visit **http://localhost:5173** 🎉
-
-### 5. Access Supabase Studio
-
-Visit **http://localhost:54323** to:
-- View database tables
-- Run SQL queries  
-- Manage auth users
-- Browse storage files
-
----
-
-## 📚 Project Structure
-
-```
-inspectflow/
-├── src/
-│   ├── api/
-│   │   ├── supabaseClient.js    # Supabase client configuration
-│   │   ├── entities.js           # Entity CRUD wrappers
-│   │   └── storage.js            # File upload helpers
-│   ├── components/               # React components
-│   ├── pages/                    # Page templates
-│   └── main.jsx                  # App entry point
-├── supabase/
-│   ├── config.toml               # Supabase configuration
-│   ├── functions/                # Edge Functions for AI
-│   │   ├── parse-notification/   # Gemini: Parse notification PDFs
-│   │   └── parse-report/         # Gemini: Parse report PDFs
-│   └── migrations/               # SQL migrations
-│       ├── 20250101000000_create_types.sql
-│       ├── 20250101000001_create_tables.sql
-│       ├── 20250101000002_setup_rls.sql
-│       └── 20250101000003_setup_storage_and_functions.sql
-├── .env.local                    # Local environment variables (gitignored)
-└── package.json
-```
-
----
-
-## 🗄️ Database Structure
-
-### Tables
-
-1. **projects** - Project/contract grouping
-2. **tpi_agencies** - Third-party inspection agencies
-3. **inspectors** - Inspector profiles
-4. **inspections** - Core inspection records
-5. **inspection_reviews** - Performance scoring
-6. **inspection_attendance** - Check-in/out tracking
-
-### Storage Buckets
-
-1. **inspection-documents** - PDFs (notifications, reports, IRCs)
-2. **inspector-cvs** - Inspector CV files
-3. **avatars** - User profile pictures
-
----
-
-## 👥 User Roles
-
-- **admin** - Full system access
-- **qc_manager** - Manage inspections, assign inspectors
-- **inspection_engineer** - Review and approve reports
-- **inspector** - Perform inspections, upload reports
-- **tpi_manager** - Manage agency inspectors
-
----
-
-## 🤖 AI Integration (Google Gemini)
-
-InspectFlow uses **Google Gemini 2.0 Flash** for automatic PDF parsing:
-
-✅ **Notification PDFs** → Auto-extract PO numbers, dates, supplier info, line items  
-✅ **Report PDFs** → Identify NCRs, findings, observations, test results  
-✅ **Multimodal** → Process PDFs, images, tables directly  
-✅ **Free Tier** → 1,500 requests/day
-
-### Quick Setup
-
-1. **Get API Key:** https://ai.google.dev/
-2. **Add to `.env.local`:**
-   ```env
-   GEMINI_API_KEY=your-api-key-here
-   ```
-3. **Set Supabase Secret:**
-   ```bash
-   npx supabase secrets set GEMINI_API_KEY=your-key
-   ```
-
-### Usage Example
-
-```javascript
-import { uploadAndParseNotification } from '@/api/ai';
-
-// Upload and auto-extract in one call
-const data = await uploadAndParseNotification(pdfFile);
-// Returns: { po_number, supplier_name, items_being_offered, ... }
-```
-
-📖 **Detailed Guide:** [docs/AI_INTEGRATION.md](./docs/AI_INTEGRATION.md)
-
----
-
-## 🔧 Useful Commands
-
-```bash
-# Start Supabase
-npx supabase start
-
-# Stop Supabase
-npx supabase stop
-
-# View Supabase status (get keys)
-npx supabase status
-
-# Reset database (⚠️ deletes all data)
-npx supabase db reset
-
-# Generate TypeScript types
-npx supabase gen types typescript --local > src/types/database.types.ts
-
-# Run development server
-npm run dev
-
-# Build for production
 npm run build
 ```
 
----
-
-## 🛠️ API Usage Examples
-
-### Authentication
-
-```javascript
-import { User } from '@/api/entities';
-
-// Sign up
-await User.signUp({
-  email: 'inspector@example.com',
-  password: 'password123',
-  options: {
-    data: {
-      role: 'inspector',
-      full_name: 'John Doe'
-    }
-  }
-});
-
-// Sign in
-await User.signIn({
-  email: 'inspector@example.com',
-  password: 'password123'
-});
-
-// Get current user
-const user = await User.getUser();
-```
-
-### CRUD Operations
-
-```javascript
-import { Inspection, Inspector } from '@/api/entities';
-
-// List inspections
-const inspections = await Inspection.list({ status: 'in_progress' });
-
-// Get single inspection
-const inspection = await Inspection.get('uuid-here');
-
-// Create new inspection
-const newInspection = await Inspection.create({
-  po_number: 'PO-12345',
-  notification_number: 'NOT-001',
-  supplier_name: 'ABC Manufacturing',
-  status: 'received'
-});
-
-// Update inspection
-await Inspection.update('uuid', { status: 'completed' });
-
-// Delete inspection
-await Inspection.delete('uuid');
-```
-
-### File Uploads
-
-```javascript
-import { uploadInspectionReport, uploadInspectorCV } from '@/api/storage';
-
-// Upload inspection report
-const reportUrl = await uploadInspectionReport(
-  fileObject,
-  inspectionId,
-  'final'
-);
-
-// Upload inspector CV
-const cvUrl = await uploadInspectorCV(fileObject, inspectorId);
-```
-
----
-
-## 🧪 Testing
-
-### Create Test Users
-
-Use Supabase Studio (http://localhost:54323):
-
-1. Go to **Authentication** → **Users**
-2. Click **Add user**
-3. Add email and password
-4. In **User Metadata**, add:
-   ```json
-   {
-     "role": "admin",
-     "full_name": "Test Admin"
-   }
-   ```
-
----
-
-## 🚨 Troubleshooting
-
-### Docker not running
-
-**Error:** `Cannot connect to Docker daemon`
-
-**Solution:** Start Docker Desktop and wait for it to fully initialize.
-
-### Port conflicts
-
-**Error:** `Port 54321 already in use`
-
-**Solution:** 
+### 4. Start the application
 ```bash
-npx supabase stop
-# Or kill process using the port
+python -m uvicorn python_app.api_server:app --host 0.0.0.0 --port 5214
+```
+Open **http://localhost:5214** in your browser. On first run, the server automatically creates clean SQLite databases (`backend/inspectflow.db` and `SmartExpedit/server/data/smartexpedit.db`) with starter tables and dev demo accounts.
+
+*(Optional — frontend hot-reload dev mode)* Run `npm run dev` on port `5173` while FastAPI runs on port `5214` (API proxy preconfigured in [vite.config.js](vite.config.js)).
+
+---
+
+## Automated Verification Suite
+
+With the server running on `http://localhost:5214` in `AUTH_MODE=dev`:
+```bash
+python verify_vendor_portal_suite.py
 ```
 
-### Environment variables not loaded
+---
 
-**Error:** Connection errors or undefined URLs
+## Production Deployment Notes
 
-**Solution:**
-1. Ensure `.env.local` exists
-2. Restart dev server: `npm run dev`
-3. Verify with: `npx supabase status`
+- Set `AUTH_MODE=production` and supply a strong random `JWT_SECRET` in `.env` (server fails closed if omitted or invalid).
+- Configure `DATABASE_URL` (PostgreSQL `postgresql+psycopg://...` or SQL Server `mssql+pyodbc://...`) and run `alembic upgrade head` (`alembic.ini` / `backend_v2/alembic/`).
+- Do not enable `SX_DEMO=1` or dev quick-login in production.
 
 ---
 
-## 📖 Further Documentation
+## Project Structure
 
-- **Supabase Docs:** https://supabase.com/docs
-- **Local Development:** https://supabase.com/docs/guides/cli/local-development
-- **Row Level Security:** https://supabase.com/docs/guides/auth/row-level-security
-
----
-
-## 🔄 Migration from Base44
-
-This project has been migrated from Base44 to Supabase. The API layer maintains backward compatibility:
-
-- `base44.entities.Inspection` → `Inspection` (from `@/api/entities`)
-- `base44.auth` → `User` (from `@/api/entities`)
-- File uploads use new `storage.js` helpers
-
-All existing components should work with minimal changes.
-
----
-
-## 📝 License
-
-Private - InspectFlow Inspection Management System
-
----
-
-**Built with ❤️ using Supabase, React, and Vite**
+```text
+├── python_app/               # FastAPI server, SQLite/ERP workflows, parsers, AI/OCR services
+├── backend_v2/               # JWT Auth/RBAC, SQLAlchemy models, Alembic migrations, storage & audit
+├── SmartExpedit/             # Embedded Expediting Workbench UI & bridge scripts
+├── src/                      # React + Vite frontend (IMS, Expediting, Vendor Portal, Governance)
+├── docs/                     # Integration & extraction documentation
+├── verify_vendor_portal_suite.py  # End-to-end security, workflow & Phase 1-5 verification suite
+├── .env.example              # Safe environment configuration template
+└── setup.ps1                 # Windows local setup script
+```

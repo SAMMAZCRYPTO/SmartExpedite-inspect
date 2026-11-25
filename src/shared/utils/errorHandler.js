@@ -81,59 +81,31 @@ export function handleDatabaseError(error, context, options = {}) {
  * @returns {string} User-friendly error message
  */
 function getUserFriendlyMessage(error) {
-    const errorCode = error.code;
     const errorMessage = error.message?.toLowerCase() || '';
-
-    // PostgreSQL error codes
-    const errorMap = {
-        // Unique violation
-        '23505': 'This record already exists. Please use a different value.',
-
-        // Foreign key violation
-        '23503': 'Cannot complete this action due to related records. Please remove dependencies first.',
-
-        // Not null violation
-        '23502': 'Required field is missing. Please fill in all required fields.',
-
-        // Check violation
-        '23514': 'Invalid data format. Please check your input.',
-
-        // Supabase specific
-        'PGRST116': 'Record not found. It may have been deleted.',
-        'PGRST301': 'You do not have permission to perform this action.',
-
-        // Connection errors
-        'PGRST000': 'Database connection error. Please try again.',
-    };
-
-    // Check for specific error code
-    if (errorCode && errorMap[errorCode]) {
-        return errorMap[errorCode];
-    }
 
     // Check for common error patterns in message
     if (errorMessage.includes('timeout')) {
         return 'Request timed out. Please check your connection and try again.';
     }
 
-    if (errorMessage.includes('network')) {
-        return 'Network error. Please check your internet connection.';
+    if (errorMessage.includes('network') || errorMessage.includes('fetch') || errorMessage.includes('failed to fetch')) {
+        return 'Network error. Please check your internet connection and ensure the backend is running.';
     }
 
-    if (errorMessage.includes('permission') || errorMessage.includes('unauthorized')) {
+    if (errorMessage.includes('permission') || errorMessage.includes('unauthorized') || errorMessage.includes('forbidden')) {
         return 'You do not have permission to perform this action.';
     }
 
-    if (errorMessage.includes('duplicate')) {
+    if (errorMessage.includes('duplicate') || errorMessage.includes('already exists')) {
         return 'This record already exists.';
     }
 
-    if (errorMessage.includes('not found')) {
+    if (errorMessage.includes('not found') || errorMessage.includes('404')) {
         return 'Record not found. It may have been deleted or you may not have access.';
     }
 
     // Generic fallback
-    return 'An unexpected error occurred. Please try again or contact support if the problem persists.';
+    return error.message || 'An unexpected error occurred. Please try again or contact support if the problem persists.';
 }
 
 /**

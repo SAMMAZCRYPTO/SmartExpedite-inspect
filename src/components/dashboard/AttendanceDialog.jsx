@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
-import { supabase } from "@/api/supabaseClient";
+import { InspectionAttendance } from "@/api/entities";
 import { useQuery } from "@tanstack/react-query";
 import {
   Dialog,
@@ -76,20 +76,8 @@ export default function AttendanceDialog({ inspection, isOpen, onClose }) {
     queryFn: async () => {
       if (!inspection?.id) return [];
       try {
-        // Call RPC function that converts PostGIS geometry to text
-        const { data, error } = await supabase.rpc('get_inspection_attendance', {
-          p_inspection_id: inspection.id
-        });
-
-        if (error) throw error;
-
-        console.log("RPC returned data:", data);
-        if (data && data.length > 0) {
-          console.log("First record:", data[0]);
-          console.log("Check-in coords text:", data[0].check_in_coordinates_text);
-          console.log("Check-out coords text:", data[0].check_out_coordinates_text);
-        }
-
+        const data = await InspectionAttendance.list({ inspectionId: inspection.id });
+        console.log("C# API returned attendance data:", data);
         return data || [];
       } catch (e) {
         console.error("Error fetching attendance:", e);
@@ -106,24 +94,42 @@ export default function AttendanceDialog({ inspection, isOpen, onClose }) {
 
     if (recordToUse) {
       if (locationType === 'check_in') {
-        // Show check-in location
-        const checkInCoords = parseCoordinates(recordToUse.check_in_coordinates_text);
-        if (checkInCoords) {
+        let lat = recordToUse.check_in_latitude;
+        let lng = recordToUse.check_in_longitude;
+        
+        if (lat === undefined || lat === null) {
+          const checkInCoords = parseCoordinates(recordToUse.check_in_coordinates_text);
+          if (checkInCoords) {
+            lat = checkInCoords.lat;
+            lng = checkInCoords.lng;
+          }
+        }
+
+        if (lat !== undefined && lat !== null && lng !== undefined && lng !== null) {
           markers.push({
-            lat: checkInCoords.lat,
-            lng: checkInCoords.lng,
-            title: `Check In: ${recordToUse.inspector_name || 'Inspector'}`,
+            lat,
+            lng,
+            title: `Check In: ${recordToUse.inspector_name || recordToUse.inspector?.full_name || 'Inspector'}`,
             description: format(new Date(recordToUse.check_in_time), "MMM d, h:mm a")
           });
         }
-      } else if (locationType === 'check_out' && recordToUse.check_out_coordinates_text) {
-        // Show check-out location
-        const checkOutCoords = parseCoordinates(recordToUse.check_out_coordinates_text);
-        if (checkOutCoords) {
+      } else if (locationType === 'check_out') {
+        let lat = recordToUse.check_out_latitude;
+        let lng = recordToUse.check_out_longitude;
+
+        if (lat === undefined || lat === null) {
+          const checkOutCoords = parseCoordinates(recordToUse.check_out_coordinates_text);
+          if (checkOutCoords) {
+            lat = checkOutCoords.lat;
+            lng = checkOutCoords.lng;
+          }
+        }
+
+        if (lat !== undefined && lat !== null && lng !== undefined && lng !== null) {
           markers.push({
-            lat: checkOutCoords.lat,
-            lng: checkOutCoords.lng,
-            title: `Check Out: ${recordToUse.inspector_name || 'Inspector'}`,
+            lat,
+            lng,
+            title: `Check Out: ${recordToUse.inspector_name || recordToUse.inspector?.full_name || 'Inspector'}`,
             description: format(new Date(recordToUse.check_out_time), "MMM d, h:mm a")
           });
         }

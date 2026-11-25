@@ -25,6 +25,7 @@ import { motion } from "framer-motion";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -37,15 +38,19 @@ import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { AnimatePresence } from "framer-motion";
 import ReportsTab from "../components/reports/ReportsTab";
 import FindingsTab from "../components/reports/FindingsTab";
+import PoExpeditingContextTab from "../components/reports/PoExpeditingContextTab";
 import UploadReportsDialog from "../components/reports/UploadReportsDialog";
+import ProjectPoAllocationDialog from "../components/expediting/ProjectPoAllocationDialog";
 import { Badge } from "@/components/ui/badge"; // Added import
 import { useProject } from "../components/context/ProjectContext";
 import ChatWidget from "../components/chat/ChatWidget";
 import AttendanceDialog from "../components/dashboard/AttendanceDialog";
+import { Users, FolderGit2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Dashboard() {
   const { selectedProjectId, currentProject } = useProject();
+  const [allocationModalOpen, setAllocationModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [editingInspection, setEditingInspection] = useState(null);
   const [viewingReportsInspection, setViewingReportsInspection] = useState(null);
@@ -113,6 +118,12 @@ export default function Dashboard() {
     mutationFn: (id) => base44.entities.Inspection.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["inspections"] });
+      queryClient.invalidateQueries({ queryKey: ["expediting"] });
+      queryClient.invalidateQueries({ queryKey: ["po-context"] });
+      toast.success("Inspection notification deleted and synced across Vendor & Expediting portals.");
+    },
+    onError: (err) => {
+      toast.error(err?.message || "Failed to delete inspection notification.");
     },
   });
 
@@ -122,6 +133,28 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ["inspections"] });
     },
   });
+
+  // Listen for inspection selection from the sidebar
+  useEffect(() => {
+    const handleSelect = (e) => {
+      const id = e?.detail?.id || sessionStorage.getItem('activeInspectionId');
+      if (!id || !inspections || inspections.length === 0) return;
+
+      const found = inspections.find(i => i.id === id);
+      if (found) {
+        setEditingInspection(found);
+        sessionStorage.removeItem('activeInspectionId'); // consume it
+      }
+    };
+
+    // Check if there's a pending selection on load/render
+    if (inspections && inspections.length > 0) {
+      handleSelect();
+    }
+
+    window.addEventListener('select-inspection', handleSelect);
+    return () => window.removeEventListener('select-inspection', handleSelect);
+  }, [inspections]);
 
   // Fetch active attendance records for the current inspector
   const { data: activeAttendance = {}, refetch: refetchAttendance } = useQuery({
@@ -171,9 +204,11 @@ export default function Dashboard() {
   };
 
   const handleCheckIn = async (inspectionId) => {
-    const profile = inspectors.find(i => i.email === currentUser?.email);
-    if (!profile) {
-      // toast.error("Inspector profile not found");
+    const profile = inspectors.find(
+      (i) => (i.email || "").trim().toLowerCase() === (currentUser?.email || "").trim().toLowerCase()
+    );
+    if (!profile || String(profile.status || "active").toLowerCase() !== "active") {
+      toast.error("Only registered, active inspectors in the Inspectors directory can attend or check in to an inspection.");
       return;
     }
 
@@ -242,37 +277,36 @@ export default function Dashboard() {
     if (isAdmin || isQCManager) {
       return inspections;
     } else if (isInspectionEngineer) {
-      return inspections.filter(inspection => inspection.created_by === currentUser?.email);
+      const userEmail = (currentUser?.email || "").toLowerCase();
+      const userId = (currentUser?.id || "").toLowerCase();
+      const userProjIds = (currentUser?.project_ids || []).map((p) => String(p).toLowerCase());
+      return inspections.filter(
+        (inspection) =>
+          (inspection.assigned_inspection_engineer_email || "").toLowerCase() === userEmail ||
+          (inspection.assigned_inspection_engineer_id || "").toLowerCase() === userId ||
+          (inspection.created_by || "").toLowerCase() === userEmail ||
+          (inspection.project_id && userProjIds.includes(String(inspection.project_id).toLowerCase()))
+      );
     } else if (isInspectionAgency) {
       const agencyName = currentUser?.company || currentUser?.company_affiliation;
       if (!agencyName) return [];
       return inspections.filter(inspection => inspection.tpi_agency === agencyName);
     } else if (isInspector) {
-      // Find the inspector profile matching current user's email
       const inspectorProfile = inspectors.find(i => i.email === currentUser?.email);
-
-      console.log("=== INSPECTOR DASHBOARD DEBUG ===");
-      console.log("Current user email:", currentUser?.email);
-      console.log("Inspectors list length:", inspectors.length);
-      console.log("Inspector profile found:", inspectorProfile);
-      if (inspectors.length > 0) {
-        console.log("First inspector:", inspectors[0]);
-      }
-      console.log("Total inspections:", inspections.length);
-
-      // Filter by assigned inspector email OR assigned inspector ID
       return inspections.filter(i =>
         (currentUser?.email && i.assigned_inspector_email === currentUser.email) ||
         (inspectorProfile && i.assigned_inspector_id === inspectorProfile.id)
       );
     }
-    return [];
+    return inspections;
   }, [inspections, currentUser, isAdmin, isQCManager, isInspectionEngineer, isInspector, isInspectionAgency, inspectors]);
 
-  // Filter by Project ID first
+  // Filter by Project ID first (supports 'all' for All Assigned Projects)
   const projectFilteredInspections = React.useMemo(() => {
-    if (!selectedProjectId) return roleFilteredInspections;
-    return roleFilteredInspections.filter(i => !i.project_id || i.project_id === selectedProjectId);
+    if (!selectedProjectId || selectedProjectId === "all") return roleFilteredInspections;
+    return roleFilteredInspections.filter(
+      (i) => String(i.project_id || "").toLowerCase() === String(selectedProjectId).toLowerCase()
+    );
   }, [roleFilteredInspections, selectedProjectId]);
 
   // Week 3: Apply search + quick filters (using computed columns from Week 1)
@@ -289,20 +323,35 @@ export default function Dashboard() {
       inspection.subsupplier_name?.toLowerCase().includes(query) ||
       inspection.country?.toLowerCase().includes(query);
 
-    // Quick filters (using computed columns from Week 1)
-    const matchesNCRs = !filterNCRs || (inspection.ncr_count && inspection.ncr_count > 0);
-    const matchesFindings = !filterFindings || (inspection.findings_count && inspection.findings_count > 0);
-    const matchesPending = !filterPending || inspection.has_pending_reports === true;
+    // Compute live findings / pending-report signals from inspection_reports
+    const reps = Array.isArray(inspection.inspection_reports) ? inspection.inspection_reports : [];
+    const allFindings = reps.flatMap((r) => (Array.isArray(r.findings) ? r.findings : []));
+    const ncrCount =
+      Number(inspection.ncr_count || 0) ||
+      allFindings.filter((f) => {
+        const t = String(f.type || "").toLowerCase();
+        const s = String(f.severity || "").toLowerCase();
+        const open = String(f.closure_status || f.status || "open").toLowerCase() !== "closed";
+        return open && (t.includes("ncr") || s.includes("critical") || s.includes("major"));
+      }).length;
+    const findCount = Number(inspection.findings_count || 0) || allFindings.length;
+    const hasPending =
+      inspection.has_pending_reports === true ||
+      reps.some((r) => String(r.approval_status || "").toLowerCase() === "pending");
+
+    const matchesNCRs = !filterNCRs || ncrCount > 0;
+    const matchesFindings = !filterFindings || findCount > 0;
+    const matchesPending = !filterPending || hasPending;
 
     return matchesSearch && matchesNCRs && matchesFindings && matchesPending;
   });
 
   const stats = {
-    total: roleFilteredInspections.length,
-    received: roleFilteredInspections.filter((i) => i.status === "received").length,
-    scheduled: roleFilteredInspections.filter((i) => i.status === "scheduled").length,
-    completed: roleFilteredInspections.filter((i) => i.status === "completed").length,
-    finalized: roleFilteredInspections.filter((i) => i.status === "finalized").length,
+    total: projectFilteredInspections.length,
+    received: projectFilteredInspections.filter((i) => i.status === "received").length,
+    scheduled: projectFilteredInspections.filter((i) => i.status === "scheduled").length,
+    completed: projectFilteredInspections.filter((i) => i.status === "completed").length,
+    finalized: projectFilteredInspections.filter((i) => i.status === "finalized").length,
   };
 
   // Upload functions
@@ -494,9 +543,11 @@ export default function Dashboard() {
       assigned_by: data.assigned_by || null,
     };
 
-    // Ensure project_id is set to current project if available
-    if (selectedProjectId) {
+    // Ensure project_id is set to current concrete project (never literal 'all')
+    if (selectedProjectId && selectedProjectId !== "all") {
       sanitizedData.project_id = selectedProjectId;
+    } else if (sanitizedData.project_id === "all") {
+      sanitizedData.project_id = null;
     }
 
     await createMutation.mutateAsync(sanitizedData);
@@ -552,9 +603,9 @@ export default function Dashboard() {
     queryClient.invalidateQueries({ queryKey: ["inspections"] });
   };
 
-  const canUpload = isAdmin || isInspectionEngineer;
+  const canUpload = isAdmin || isInspectionEngineer || isQCManager;
   const canEdit = isAdmin || isInspectionEngineer || isQCManager;
-  const canDelete = isAdmin || isInspectionEngineer;
+  const canDelete = isAdmin || isInspectionEngineer || isQCManager;
 
   const getDashboardTitle = () => {
     const projectPrefix = currentProject ? `${currentProject.name} - ` : "";
@@ -586,22 +637,58 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 pb-8">
-      {/* Header with Upload Button */}
+      {/* Header with Upload & Project/PO Team Allocation Buttons */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">{getDashboardTitle()}</h1>
           <p className="text-gray-600">{getDashboardDescription()}</p>
+          {currentProject && (
+            <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
+              <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">
+                [{currentProject.code}] {currentProject.name}
+              </Badge>
+              <span className="text-gray-600">
+                <b>QC / Inspection Manager:</b> {currentProject.inspection_manager_name || "Dr. Henrik Lindqvist"}
+              </span>
+              <span className="text-gray-400">•</span>
+              <span className="text-gray-600">
+                <b>Paired Expediting Manager:</b> {currentProject.expediting_manager_name || "Tariq Al-Mansoor"}
+              </span>
+            </div>
+          )}
         </div>
-        {canUpload && (
-          <Button
-            onClick={() => setUploadModalOpen(true)}
-            className="bg-indigo-600 hover:bg-indigo-700 h-12 px-6 elevation-2 hover:elevation-3 w-full md:w-auto"
-          >
-            <Upload className="w-5 h-5 mr-2" />
-            Upload Notification
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {(isAdmin || isQCManager || isInspectionEngineer) && (
+            <Button
+              variant="outline"
+              onClick={() => setAllocationModalOpen(true)}
+              className="border-indigo-300 text-indigo-700 hover:bg-indigo-50 h-12 px-4 font-semibold"
+            >
+              <Users className="w-4 h-4 mr-2" />
+              Project &amp; PO Team Allocation
+            </Button>
+          )}
+          {canUpload && (
+            <Button
+              onClick={() => setUploadModalOpen(true)}
+              className="bg-indigo-600 hover:bg-indigo-700 h-12 px-6 elevation-2 hover:elevation-3 w-full md:w-auto"
+            >
+              <Upload className="w-5 h-5 mr-2" />
+              Upload Notification
+            </Button>
+          )}
+        </div>
       </div>
+
+      <ProjectPoAllocationDialog
+        open={allocationModalOpen}
+        onOpenChange={setAllocationModalOpen}
+        defaultTab="paired-po"
+        initialProjectId={selectedProjectId}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["inspections"] });
+        }}
+      />
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
@@ -782,6 +869,9 @@ export default function Dashboard() {
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Inspection Details</DialogTitle>
+            <DialogDescription>
+              Review, assign a registered inspector, update schedule items, or remove an unfinalized inspection notification.
+            </DialogDescription>
           </DialogHeader>
           {editingInspection && (
             <ReviewForm
@@ -797,14 +887,24 @@ export default function Dashboard() {
                   assigned_by: data.assigned_by || null,
                 };
 
-                // Ensure project_id is set to current project if available
-                if (selectedProjectId) {
+                // Ensure project_id is set to current concrete project (never literal 'all')
+                if (selectedProjectId && selectedProjectId !== "all") {
                   sanitizedData.project_id = selectedProjectId;
+                } else if (sanitizedData.project_id === "all") {
+                  sanitizedData.project_id = null;
                 }
 
                 updateMutation.mutate({ id: editingInspection.id, data: sanitizedData });
               }}
               onCancel={() => setEditingInspection(null)}
+              onDelete={
+                canDelete
+                  ? (id) =>
+                      deleteMutation.mutate(id, {
+                        onSuccess: () => setEditingInspection(null),
+                      })
+                  : null
+              }
               isSaving={updateMutation.isPending}
               currentUser={currentUser}
               currentProjectId={selectedProjectId}
@@ -813,7 +913,7 @@ export default function Dashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Reports Dialog - Now with tabs for Reports and Actions */}
+      {/* Reports Dialog - Now with tabs for Reports, Findings/RAIL, and PO BOM & VDRL/ITP Context */}
       <Dialog open={!!viewingReportsInspection} onOpenChange={() => {
         setViewingReportsInspection(null);
         setReportsDialogTab("reports"); // Reset tab on close
@@ -821,20 +921,26 @@ export default function Dashboard() {
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              Findings
+              Inspection Deliverables, Findings &amp; PO Expediting Context — {viewingReportsInspection?.notification_number}
             </DialogTitle>
+            <DialogDescription>
+              View uploaded inspection reports, close out technical findings, and inspect linked PO BOM and VDRL/ITP context.
+            </DialogDescription>
           </DialogHeader>
           {viewingReportsInspection && (
             <Tabs value={reportsDialogTab} onValueChange={setReportsDialogTab} className="w-full">
-              <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
-                <TabsTrigger value="reports">Reports & Release</TabsTrigger>
+              <TabsList className="grid w-full max-w-2xl grid-cols-3 mb-6">
+                <TabsTrigger value="reports">Reports &amp; IRC Release</TabsTrigger>
                 <TabsTrigger value="actions">
-                  Actions
+                  Findings &amp; NCRs (RAIL)
                   {getOpenFindingsCount(viewingReportsInspection) > 0 && (
                     <Badge className="ml-2 bg-red-500 text-white animate-pulse">
                       {getOpenFindingsCount(viewingReportsInspection)}
                     </Badge>
                   )}
+                </TabsTrigger>
+                <TabsTrigger value="po_context">
+                  PO BOM &amp; VDRL/ITP
                 </TabsTrigger>
               </TabsList>
 
@@ -852,6 +958,12 @@ export default function Dashboard() {
                   inspection={viewingReportsInspection}
                   onUpdate={handleFindingsUpdate}
                   currentUser={currentUser}
+                />
+              </TabsContent>
+
+              <TabsContent value="po_context">
+                <PoExpeditingContextTab
+                  inspection={viewingReportsInspection}
                 />
               </TabsContent>
             </Tabs>
@@ -878,6 +990,9 @@ export default function Dashboard() {
         <DialogContent className={`max-h-[95vh] overflow-y-auto transition-all duration-300 ${currentEditingIndex !== null ? 'max-w-[95vw] w-[95vw]' : 'max-w-5xl'}`}>
           <DialogHeader>
             <DialogTitle className="text-2xl">Upload Notifications</DialogTitle>
+            <DialogDescription>
+              Upload one or more PDF Inspection Notifications (NOIs) to extract schedule, items, and vendor details automatically.
+            </DialogDescription>
           </DialogHeader>
 
           {error && (

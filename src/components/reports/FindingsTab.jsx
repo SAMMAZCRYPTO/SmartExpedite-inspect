@@ -62,6 +62,14 @@ export default function FindingsTab({ inspection, onUpdate, currentUser }) {
   const [viewingDocumentUrl, setViewingDocumentUrl] = useState(null);
   const [viewingDocumentTitle, setViewingDocumentTitle] = useState("");
 
+  // Inspection Engineer Missed Finding / Deliverable Comment State
+  const [addFindingOpen, setAddFindingOpen] = useState(false);
+  const [newFindingType, setNewFindingType] = useState("NCR");
+  const [newFindingSeverity, setNewFindingSeverity] = useState("Major");
+  const [newFindingDesc, setNewFindingDesc] = useState("");
+  const [newFindingRef, setNewFindingRef] = useState("");
+  const [addingFinding, setAddingFinding] = useState(false);
+
   const inspectionReports = inspection.inspection_reports || [];
 
   const isAdmin = currentUser?.role === "admin" || currentUser?.inspection_role === "admin";
@@ -74,6 +82,41 @@ export default function FindingsTab({ inspection, onUpdate, currentUser }) {
   const isAssignedInspector = isInspector && (inspection.assigned_inspector_email === currentUser?.email || inspection.assigned_inspector_id === currentUser?.id);
 
   const canCloseFindings = isAdmin || isInspectionEngineer || isQCManager || isAssignedInspector || isAssignedTPI;
+  const canAddFinding = isAdmin || isInspectionEngineer || isQCManager;
+
+  const handleAddEngineerFinding = async () => {
+    if (!newFindingDesc.trim()) {
+      toast.error("Please enter the finding or deliverable discrepancy description.");
+      return;
+    }
+    setAddingFinding(true);
+    try {
+      const res = await fetch(`/api/v1/inspections/${encodeURIComponent(inspection.id)}/add-finding`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: newFindingType,
+          severity: newFindingSeverity,
+          description: newFindingDesc.trim(),
+          item_reference: newFindingRef.trim(),
+          added_by: currentUser?.full_name || currentUser?.email || "Inspection Engineer",
+          added_by_role: (currentUser?.inspection_role || currentUser?.role || "INSPECTION_ENGINEER").toUpperCase(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to add finding");
+
+      toast.success("✓ Finding added by Inspection Engineer and pushed to Expediting RAIL!");
+      setAddFindingOpen(false);
+      setNewFindingDesc("");
+      setNewFindingRef("");
+      if (onUpdate) onUpdate();
+    } catch (err) {
+      toast.error(err.message || "Failed to add finding");
+    } finally {
+      setAddingFinding(false);
+    }
+  };
 
   // Group findings by report
   const reportGroups = inspectionReports
@@ -174,23 +217,35 @@ export default function FindingsTab({ inspection, onUpdate, currentUser }) {
         inspection_reports: updatedReports
       });
 
-      // Notify QC Engineer and Manager
+      // Stage 1 Technical Closeout Sync to SmartExpedit RAIL (sx_state.concerns -> PENDING_VERIFICATION)
       try {
-        // Find recipients
-        const recipients = [];
-        if (inspection.created_by) recipients.push(inspection.created_by); // QC Engineer (Creator)
+        await fetch("/api/v1/rail/technical-close", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            po: inspection.po_number,
+            item_id: closingFindingId,
+            inspector: currentUser?.full_name || currentUser?.email || "Inspector",
+            remarks: closureJustification,
+            evidence_url: uploadedDocs[0]?.url || "",
+          }),
+        });
+      } catch (railErr) {
+        console.error("Stage 1 RAIL sync error:", railErr);
+      }
 
-        // If there's a specific QC Manager assigned or system-wide, we'd add them.
-        // For now, we just notify the creator (QC Engineer) and try to find QC Managers
-        // Since we can't easily query users here without context/hook, we will send to creator.
-        // If the current user IS the creator, maybe we don't need to notify? But let's do it for audit.
-
-        if (recipients.length > 0) {
-          await base44.integrations.Core.SendEmail({
-            to: recipients.join(','),
-            subject: `Finding Closed - ${inspection.notification_number}`,
-            body: `A finding has been closed for inspection ${inspection.notification_number} (PO: ${inspection.po_number}).\n\nClosed By: ${currentUser?.full_name} (${currentUser?.email})\nJustification: ${closureJustification}\n\nPlease log in to InspectFlow to review.`
-          });
+      // Optional closure notification skipped cleanly if SendEmail helper is not configured
+      try {
+        if (base44.integrations?.Core?.SendEmail) {
+          const recipients = [];
+          if (inspection.created_by) recipients.push(inspection.created_by);
+          if (recipients.length > 0) {
+            await base44.integrations.Core.SendEmail({
+              to: recipients.join(','),
+              subject: `Finding Closed - ${inspection.notification_number}`,
+              body: `A finding has been closed for inspection ${inspection.notification_number} (PO: ${inspection.po_number}).\n\nClosed By: ${currentUser?.full_name} (${currentUser?.email})\nJustification: ${closureJustification}\n\nPlease log in to InspectFlow to review.`
+            });
+          }
         }
       } catch (notifyError) {
         console.error("Failed to send notification email", notifyError);
@@ -261,7 +316,8 @@ export default function FindingsTab({ inspection, onUpdate, currentUser }) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => handleViewDocument(group.reportUrl, group.reportName)}
+                disabled={!group.reportUrl}
+                onClick={() => group.reportUrl && handleViewDocument(group.reportUrl, group.reportName)}
                 className="flex items-center gap-2"
               >
                 <Eye className="w-4 h-4" />
@@ -270,7 +326,8 @@ export default function FindingsTab({ inspection, onUpdate, currentUser }) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => window.open(group.reportUrl, '_blank')}
+                disabled={!group.reportUrl}
+                onClick={() => group.reportUrl && window.open(group.reportUrl, '_blank', 'noopener,noreferrer')}
                 className="flex items-center gap-2"
               >
                 <ExternalLink className="w-4 h-4" />
@@ -279,7 +336,8 @@ export default function FindingsTab({ inspection, onUpdate, currentUser }) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => handleDownloadReport(group.reportUrl, group.reportName)}
+                disabled={!group.reportUrl}
+                onClick={() => group.reportUrl && handleDownloadReport(group.reportUrl, group.reportName)}
                 className="flex items-center gap-2"
               >
                 <Download className="w-4 h-4" />
@@ -402,6 +460,27 @@ export default function FindingsTab({ inspection, onUpdate, currentUser }) {
 
   return (
     <div className="space-y-6">
+      {/* Inspection Engineer / QC Manager Deliverable Review Header & Add Missed Finding Trigger */}
+      {canAddFinding && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-indigo-50/70 border border-indigo-200 rounded-xl p-3.5">
+          <div>
+            <h4 className="text-xs font-bold text-indigo-950 uppercase tracking-wider">
+              Inspection Engineer &amp; QC Deliverable Review
+            </h4>
+            <p className="text-xs text-indigo-800/80 mt-0.5">
+              Notice a missed non-conformance, missing MTC, or procedure deviation in the inspector&apos;s report? Log it here to block release and auto-escalate to Expediting RAIL.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => setAddFindingOpen(true)}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shrink-0"
+          >
+            + Add Missed Finding / IE Comment
+          </Button>
+        </div>
+      )}
+
       {/* Summary Alert */}
       {totalFindings === 0 ? (
         <Alert className="bg-green-50 border-green-200">
@@ -606,6 +685,75 @@ export default function FindingsTab({ inspection, onUpdate, currentUser }) {
               title="Document Viewer"
             />
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Missed Finding / IE Review Comment Dialog */}
+      <Dialog open={addFindingOpen} onOpenChange={setAddFindingOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add Missed Finding / Deliverable Review Discrepancy</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs font-semibold">Finding Type</Label>
+                <select
+                  value={newFindingType}
+                  onChange={(e) => setNewFindingType(e.target.value)}
+                  className="w-full mt-1 h-9 rounded-md border border-gray-300 bg-white px-3 text-xs font-medium"
+                >
+                  <option value="NCR">NCR (Non-Conformance Report)</option>
+                  <option value="Concern">Concern / Deliverable Missing</option>
+                  <option value="Observation">Minor Punch / Observation</option>
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Severity</Label>
+                <select
+                  value={newFindingSeverity}
+                  onChange={(e) => setNewFindingSeverity(e.target.value)}
+                  className="w-full mt-1 h-9 rounded-md border border-gray-300 bg-white px-3 text-xs font-medium"
+                >
+                  <option value="Critical">Critical (Blocks IRC Release)</option>
+                  <option value="Major">Major (Blocks IRC Release)</option>
+                  <option value="Minor">Minor (Allows Release w/ Punch)</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold">Item / ITP Clause / Deliverable Reference</Label>
+              <Input
+                value={newFindingRef}
+                onChange={(e) => setNewFindingRef(e.target.value)}
+                placeholder="e.g. Item 10.2 / ITP Clause 4.3 / Missing 3.1 MTC"
+                className="mt-1 text-xs"
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold">Detailed Finding / Comment *</Label>
+              <Textarea
+                rows={4}
+                value={newFindingDesc}
+                onChange={(e) => setNewFindingDesc(e.target.value)}
+                placeholder="Describe the missing deliverable, test deviation, or requirement discrepancy noted during review..."
+                className="mt-1 text-xs"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setAddFindingOpen(false)} disabled={addingFinding}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleAddEngineerFinding}
+              disabled={addingFinding || !newFindingDesc.trim()}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              {addingFinding ? "Saving & Syncing..." : "Add Finding & Push to RAIL"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

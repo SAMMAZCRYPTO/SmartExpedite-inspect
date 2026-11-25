@@ -11,7 +11,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Users, Search, Shield, Edit, Mail, UserX, FolderGit2, Plus, Trash2, UserCog, Building2 } from "lucide-react";
+import {
+  Users,
+  Search,
+  Shield,
+  Edit,
+  Mail,
+  UserX,
+  FolderGit2,
+  Plus,
+  Trash2,
+  UserCog,
+  Building2,
+  Package,
+  ShieldCheck,
+  CheckCircle2,
+} from "lucide-react";
 import { motion } from "framer-motion";
 import {
   Dialog,
@@ -34,31 +49,60 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import ProjectPoAllocationDialog from "@/components/expediting/ProjectPoAllocationDialog";
 
 const roleColors = {
   admin: "bg-red-100 text-red-800 border-red-200",
-  inspection_engineer: "bg-blue-100 text-blue-800 border-blue-200",
+  expediting_manager: "bg-indigo-100 text-indigo-800 border-indigo-200",
   qc_manager: "bg-green-100 text-green-800 border-green-200",
+  expeditor: "bg-sky-100 text-sky-800 border-sky-200",
+  field_expeditor: "bg-teal-100 text-teal-800 border-teal-200",
+  doc_expeditor: "bg-cyan-100 text-cyan-800 border-cyan-200",
+  inspection_engineer: "bg-blue-100 text-blue-800 border-blue-200",
   inspector: "bg-purple-100 text-purple-800 border-purple-200",
   inspection_agency: "bg-amber-100 text-amber-800 border-amber-200",
+  vendor: "bg-orange-100 text-orange-800 border-orange-200",
 };
 
 const roleLabels = {
-  admin: "Admin",
+  admin: "Global Admin",
+  expediting_manager: "Expediting Manager",
+  qc_manager: "QC / Inspection Manager",
+  expeditor: "Package Expeditor",
+  field_expeditor: "Field Expeditor",
+  doc_expeditor: "Document Controller (VDRL)",
   inspection_engineer: "Inspection Engineer",
-  qc_manager: "QC Manager",
-  inspector: "Inspector",
-  inspection_agency: "Inspection Agency",
+  inspector: "Field / TPI Inspector",
+  inspection_agency: "TPI Agency Coordinator",
+  vendor: "Vendor Portal User",
 };
 
 export default function UserManagement() {
-  const [activeTab, setActiveTab] = useState("users");
+  const [activeTab, setActiveTab] = useState("projects");
   const [searchQuery, setSearchQuery] = useState("");
   const [editingUser, setEditingUser] = useState(null);
   const [deactivatingUser, setDeactivatingUser] = useState(null);
   const [editingProject, setEditingProject] = useState(null);
   const [deletingProject, setDeletingProject] = useState(null);
   const [isAddingProject, setIsAddingProject] = useState(false);
+
+  // Governance & Paired PO Allocation Modal
+  const [allocationModalOpen, setAllocationModalOpen] = useState(false);
+  const [allocationDefaultTab, setAllocationDefaultTab] = useState("paired-po");
+  const [allocationProjId, setAllocationProjId] = useState(null);
+
+  // Add New Vendor Modal
+  const [addVendorOpen, setAddVendorOpen] = useState(false);
+  const [savingVendor, setSavingVendor] = useState(false);
+  const [vendorForm, setVendorForm] = useState({
+    company_affiliation: "",
+    full_name: "",
+    email: "",
+    phone: "",
+    password: "",
+    project_ids: [],
+  });
+
   const [editFormData, setEditFormData] = useState({
     inspection_role: "",
     company_affiliation: "",
@@ -70,8 +114,11 @@ export default function UserManagement() {
   const [projectFormData, setProjectFormData] = useState({
     name: "",
     code: "",
+    client_name: "",
     description: "",
     status: "active",
+    expediting_manager_id: "",
+    inspection_manager_id: "",
   });
 
   const queryClient = useQueryClient();
@@ -100,20 +147,32 @@ export default function UserManagement() {
     initialData: [],
   });
 
+  const { data: govOverview, refetch: refetchGovernance } = useQuery({
+    queryKey: ["governance-overview"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/governance/overview");
+      return res.json();
+    },
+  });
+
   const updateUserMutation = useMutation({
     mutationFn: ({ id, data }) => base44.entities.User.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["governance-overview"] });
+      window.dispatchEvent(new CustomEvent("governance-updated"));
       setEditingUser(null);
-      toast.success("User role updated successfully");
+      toast.success("User role & project assignments updated");
     },
   });
 
   const deactivateUserMutation = useMutation({
-    mutationFn: ({ id }) => base44.entities.User.update(id, {
-      inspection_role: null,
-      user_status: "deactivated",
-    }),
+    mutationFn: ({ id }) =>
+      base44.entities.User.update(id, {
+        role: "guest",
+        inspection_role: null,
+        user_status: "deactivated",
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       setDeactivatingUser(null);
@@ -124,7 +183,7 @@ export default function UserManagement() {
   const handleEdit = (user) => {
     setEditingUser(user);
     setEditFormData({
-      inspection_role: user.inspection_role || "",
+      inspection_role: user.inspection_role || user.role || "",
       company_affiliation: user.company_affiliation || "",
       phone: user.phone || "",
       department: user.department || "",
@@ -152,415 +211,526 @@ export default function UserManagement() {
   const roleStats = {
     total: users.length,
     admin: users.filter((u) => u.inspection_role === "admin" || u.role === "admin").length,
+    managers: users.filter((u) =>
+      ["expediting_manager", "qc_manager"].includes(u.inspection_role || u.role)
+    ).length,
+    expeditors: users.filter((u) =>
+      ["expeditor", "field_expeditor", "doc_expeditor"].includes(u.inspection_role || u.role)
+    ).length,
     inspection_engineer: users.filter((u) => u.inspection_role === "inspection_engineer").length,
-    qc_manager: users.filter((u) => u.inspection_role === "qc_manager").length,
     inspector: users.filter((u) => u.inspection_role === "inspector").length,
-    inspection_agency: users.filter((u) => u.inspection_role === "inspection_agency").length,
+    vendor: users.filter((u) => (u.inspection_role || u.role) === "vendor").length,
     unassigned: users.filter((u) => !u.inspection_role && u.role !== "admin").length,
   };
 
-  const createProjectMutation = useMutation({
-    mutationFn: (data) => base44.entities.Project.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-      setIsAddingProject(false);
-      toast.success("Project created successfully");
-    },
-    onError: () => {
-      toast.error("Failed to create project");
-    }
-  });
-
-  const updateProjectMutation = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.Project.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-      setEditingProject(null);
-      toast.success("Project updated successfully");
-    },
-    onError: () => {
-      toast.error("Failed to update project");
-    }
-  });
+  const saveProjectGovernance = async (payload) => {
+    const res = await fetch("/api/v1/governance/project-assign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.detail || "Failed to save project");
+    queryClient.invalidateQueries({ queryKey: ["projects"] });
+    queryClient.invalidateQueries({ queryKey: ["users"] });
+    queryClient.invalidateQueries({ queryKey: ["governance-overview"] });
+    window.dispatchEvent(new CustomEvent("governance-updated"));
+    return json;
+  };
 
   const deleteProjectMutation = useMutation({
     mutationFn: (id) => base44.entities.Project.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["governance-overview"] });
+      window.dispatchEvent(new CustomEvent("governance-updated"));
       setDeletingProject(null);
       toast.success("Project deleted successfully");
     },
     onError: () => {
       toast.error("Failed to delete project");
-    }
+    },
   });
 
+  const expManagers = users.filter((u) =>
+    ["expediting_manager", "admin"].includes(u.inspection_role || u.role)
+  );
+  const inspManagers = users.filter((u) =>
+    ["qc_manager", "admin"].includes(u.inspection_role || u.role)
+  );
+  const enrichedProjects = govOverview?.projects || projects;
+
   return (
-    <div className="space-y-8 pb-8">
+    <div className="space-y-6 pb-8">
       {/* Header */}
-      <div>
-        <h1 className="text-4xl font-bold text-gray-900 mb-2">User Management</h1>
-        <p className="text-gray-600">
-          Assign roles and permissions to users in the system
-        </p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-1">
+            Global Admin — Project &amp; Departmental Governance
+          </h1>
+          <p className="text-sm text-gray-600">
+            Assign Projects to Expediting Managers &amp; Inspection/QC Managers, pair Expeditors &amp; Inspection Engineers per PO, and manage user access.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            onClick={() => {
+              setAllocationDefaultTab("paired-po");
+              setAllocationProjId(null);
+              setAllocationModalOpen(true);
+            }}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs h-9 font-semibold"
+          >
+            <ShieldCheck className="w-4 h-4 mr-1.5" />
+            Project &amp; PO Team Allocation Hub
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setAllocationDefaultTab("new-po-bom");
+              setAllocationProjId(null);
+              setAllocationModalOpen(true);
+            }}
+            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-xs h-9 font-semibold"
+          >
+            <Package className="w-4 h-4 mr-1.5" />
+            + Onboard New PO &amp; BOM
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        <Card className="p-4 elevation-1">
-          <p className="text-sm text-gray-500 mb-1">Total Users</p>
-          <p className="text-2xl font-bold text-gray-900">{roleStats.total}</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <Card className="p-3.5 elevation-1">
+          <p className="text-xs text-gray-500 mb-1">Active Projects</p>
+          <p className="text-2xl font-bold text-indigo-700">{enrichedProjects.length}</p>
         </Card>
-        <Card className="p-4 elevation-1">
-          <p className="text-sm text-gray-500 mb-1">Admins</p>
-          <p className="text-2xl font-bold text-red-600">{roleStats.admin}</p>
+        <Card className="p-3.5 elevation-1">
+          <p className="text-xs text-gray-500 mb-1">Dept Managers (Exp/QC)</p>
+          <p className="text-2xl font-bold text-emerald-600">{roleStats.managers}</p>
         </Card>
-        <Card className="p-4 elevation-1">
-          <p className="text-sm text-gray-500 mb-1">Engineers</p>
+        <Card className="p-3.5 elevation-1">
+          <p className="text-xs text-gray-500 mb-1">Expeditors (Pkg/Field)</p>
+          <p className="text-2xl font-bold text-sky-600">{roleStats.expeditors}</p>
+        </Card>
+        <Card className="p-3.5 elevation-1">
+          <p className="text-xs text-gray-500 mb-1">Inspection Engineers</p>
           <p className="text-2xl font-bold text-blue-600">{roleStats.inspection_engineer}</p>
         </Card>
-        <Card className="p-4 elevation-1">
-          <p className="text-sm text-gray-500 mb-1">QC Managers</p>
-          <p className="text-2xl font-bold text-green-600">{roleStats.qc_manager}</p>
-        </Card>
-        <Card className="p-4 elevation-1">
-          <p className="text-sm text-gray-500 mb-1">Inspectors</p>
+        <Card className="p-3.5 elevation-1">
+          <p className="text-xs text-gray-500 mb-1">TPI Inspectors</p>
           <p className="text-2xl font-bold text-purple-600">{roleStats.inspector}</p>
         </Card>
-        <Card className="p-4 elevation-1">
-          <p className="text-sm text-gray-500 mb-1">Agencies</p>
-          <p className="text-2xl font-bold text-amber-600">{roleStats.inspection_agency}</p>
+        <Card className="p-3.5 elevation-1">
+          <p className="text-xs text-gray-500 mb-1">Total Users</p>
+          <p className="text-2xl font-bold text-gray-900">{roleStats.total}</p>
         </Card>
       </div>
 
-      {/* Tabs for Users and Projects */}
+      {/* Tabs for Projects, Users, and Inspectors */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full max-w-2xl grid-cols-3">
+          <TabsTrigger value="projects">
+            <FolderGit2 className="w-4 h-4 mr-2" />
+            Projects &amp; PO Assignments ({enrichedProjects.length})
+          </TabsTrigger>
           <TabsTrigger value="users">
             <Users className="w-4 h-4 mr-2" />
-            Users
+            Users &amp; Roles ({users.length})
           </TabsTrigger>
           <TabsTrigger value="inspectors">
             <UserCog className="w-4 h-4 mr-2" />
-            Inspectors
-          </TabsTrigger>
-          <TabsTrigger value="projects">
-            <FolderGit2 className="w-4 h-4 mr-2" />
-            Projects
+            Inspectors ({inspectors.length})
           </TabsTrigger>
         </TabsList>
 
-        {/* Users Tab */}
-        <TabsContent value="users" className="mt-6 space-y-6">
-          {/* Unassigned Users Alert */}
-          {roleStats.unassigned > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <div className="flex items-center gap-2">
-                <Shield className="w-5 h-5 text-amber-600" />
-                <p className="text-sm font-medium text-amber-900">
-                  <strong>{roleStats.unassigned}</strong> user{roleStats.unassigned > 1 ? 's' : ''} without assigned roles
-                </p>
-              </div>
+        {/* ── TAB 1: PROJECTS & INTERLINKED MANAGERS / POs ── */}
+        <TabsContent value="projects" className="mt-6 space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-indigo-50/70 border border-indigo-200 rounded-xl p-4">
+            <div className="text-xs text-indigo-950 space-y-0.5">
+              <p className="font-bold text-sm">
+                2-Tier Cascading Governance: Global Admin &rarr; Expediting Manager &amp; QC Manager &rarr; Paired PO Teams
+              </p>
+              <p className="text-indigo-700">
+                Every Project has an assigned Expediting Manager and Inspection/QC Manager. All Purchase Orders and BOMs under the project are interlinked across both modules.
+              </p>
             </div>
-          )}
+            <Button
+              onClick={() => {
+                setProjectFormData({
+                  name: "",
+                  code: `PRJ-${Math.floor(1000 + Math.random() * 9000)}`,
+                  client_name: "ADNOC / QatarEnergy",
+                  description: "",
+                  status: "active",
+                  expediting_manager_id: expManagers[0]?.id || "",
+                  inspection_manager_id: inspManagers[0]?.id || "",
+                });
+                setIsAddingProject(true);
+              }}
+              className="bg-indigo-600 hover:bg-indigo-700 text-xs h-9"
+            >
+              <Plus className="w-4 h-4 mr-1.5" />
+              Create &amp; Assign New Project
+            </Button>
+          </div>
 
-          {/* Search */}
-          <div className="bg-white rounded-2xl p-6 elevation-2">
+          <div className="space-y-4">
+            {enrichedProjects.map((project, idx) => {
+              const linkedPos = project.linked_pos || [];
+              return (
+                <motion.div
+                  key={project.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.04 }}
+                >
+                  <Card className="p-5 elevation-2 border-gray-200 space-y-4">
+                    <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 pb-3 border-b border-gray-100">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          <span className="font-mono font-bold text-xs bg-indigo-100 text-indigo-800 px-2.5 py-1 rounded-md border border-indigo-200">
+                            {project.code}
+                          </span>
+                          <h3 className="text-lg font-bold text-gray-900">
+                            {project.name}
+                          </h3>
+                          <Badge
+                            className={`border font-medium ${
+                              project.status === "active"
+                                ? "bg-green-100 text-green-800 border-green-200"
+                                : "bg-gray-100 text-gray-600 border-gray-300"
+                            }`}
+                          >
+                            {project.status === "active" ? "Active" : project.status}
+                          </Badge>
+                          {project.client_name && (
+                            <span className="text-xs text-gray-500">
+                              • Client: <b>{project.client_name}</b>
+                            </span>
+                          )}
+                        </div>
+                        {project.description && (
+                          <p className="text-xs text-gray-600">
+                            {project.description}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setAllocationDefaultTab("paired-po");
+                            setAllocationProjId(project.id);
+                            setAllocationModalOpen(true);
+                          }}
+                          className="text-xs h-8 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                        >
+                          <Users className="w-3.5 h-3.5 mr-1.5" />
+                          Allocate PO Teams ({linkedPos.length})
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditingProject({
+                              ...project,
+                              expediting_manager_id: project.expediting_manager_id || expManagers[0]?.id || "",
+                              inspection_manager_id: project.inspection_manager_id || inspManagers[0]?.id || "",
+                            });
+                          }}
+                          className="text-xs h-8"
+                        >
+                          <Edit className="w-3.5 h-3.5 mr-1.5" />
+                          Edit Project &amp; Managers
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setDeletingProject(project)}
+                          className="text-xs h-8 text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Tier 1 Assigned Managers Banner */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="p-3 rounded-xl bg-indigo-50/60 border border-indigo-200/80 flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] uppercase tracking-wider font-bold text-indigo-600 block">
+                            Tier-1 Assigned Expediting Manager
+                          </span>
+                          <span className="text-xs font-bold text-gray-900">
+                            {project.expediting_manager_name || "Tariq Al-Mansoor (Expediting Manager)"}
+                          </span>
+                          <span className="text-[11px] text-gray-500 block">
+                            {project.expediting_manager_email || "pexm@inspectflow.com"}
+                          </span>
+                        </div>
+                        <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-[10px]">
+                          Full Project PO Access
+                        </Badge>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-emerald-50/60 border border-emerald-200/80 flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-700 block">
+                            Tier-1 Assigned Inspection / QC Manager
+                          </span>
+                          <span className="text-xs font-bold text-gray-900">
+                            {project.inspection_manager_name || "Dr. Henrik Lindqvist (QC / Inspection Manager)"}
+                          </span>
+                          <span className="text-[11px] text-gray-500 block">
+                            {project.inspection_manager_email || "qc@inspectflow.com"}
+                          </span>
+                        </div>
+                        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px]">
+                          Full Quality &amp; IRC Oversight
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {/* Tier 2 Interlinked POs & Paired Expeditor <-> Inspection Engineer Table */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-gray-800">
+                          Interlinked Purchase Orders &amp; Hand-in-Hand Team Assignments ({linkedPos.length} POs)
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => {
+                            setAllocationDefaultTab("new-po-bom");
+                            setAllocationProjId(project.id);
+                            setAllocationModalOpen(true);
+                          }}
+                          className="text-xs text-emerald-700 hover:bg-emerald-50 h-6 px-2 font-semibold"
+                        >
+                          <Plus className="w-3 h-3 mr-1" /> Add PO &amp; BOM to {project.code}
+                        </Button>
+                      </div>
+
+                      {linkedPos.length === 0 ? (
+                        <div className="p-3 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-500">
+                          No Purchase Orders linked to this project yet. Click "+ Add PO &amp; BOM" above.
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto rounded-lg border border-gray-200">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-gray-50 text-gray-600 font-semibold border-b border-gray-200">
+                              <tr>
+                                <th className="py-2 px-3">PO Number</th>
+                                <th className="py-2 px-3">Supplier / Vendor</th>
+                                <th className="py-2 px-3">Package Description</th>
+                                <th className="py-2 px-3">BOM Lines</th>
+                                <th className="py-2 px-3">Assigned Package Expeditor</th>
+                                <th className="py-2 px-3">Paired Inspection Engineer</th>
+                                <th className="py-2 px-3">Linked NOIs</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {linkedPos.map((po) => (
+                                <tr key={po.po} className="hover:bg-gray-50/70">
+                                  <td className="py-2 px-3 font-mono font-bold text-indigo-700">
+                                    {po.po}
+                                  </td>
+                                  <td className="py-2 px-3 font-medium text-gray-900">
+                                    {po.supplier}
+                                  </td>
+                                  <td className="py-2 px-3 text-gray-600 max-w-xs truncate">
+                                    {po.head}
+                                  </td>
+                                  <td className="py-2 px-3">
+                                    <Badge variant="outline" className="text-[10px]">
+                                      {po.bom_count} items ({po.total_ordered_qty} qty)
+                                    </Badge>
+                                  </td>
+                                  <td className="py-2 px-3 font-semibold text-indigo-800">
+                                    {po.assigned_expeditor_name || "Ali Al-Rashid"}
+                                  </td>
+                                  <td className="py-2 px-3 font-semibold text-emerald-800">
+                                    {po.assigned_inspection_engineer_name || "Omar Farooq"}
+                                  </td>
+                                  <td className="py-2 px-3">
+                                    <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-[10px]">
+                                      {po.inspection_count} NOI(s)
+                                    </Badge>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                </motion.div>
+              );
+            })}
+          </div>
+        </TabsContent>
+
+        {/* ── TAB 2: USERS & ROLES ── */}
+        <TabsContent value="users" className="mt-6 space-y-6">
+          <div className="bg-white rounded-2xl p-5 elevation-2">
             <div className="relative">
               <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
               <Input
                 placeholder="Search by name, email, role, or company..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-12 h-12 text-base border-2 focus:border-indigo-600 rounded-xl"
+                className="pl-12 h-11 text-sm border-2 focus:border-indigo-600 rounded-xl"
               />
             </div>
           </div>
 
-          {/* Users Table */}
           <Card className="elevation-2">
-            <div className="p-6 border-b flex items-center gap-3">
-              <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
-                <Users className="w-5 h-5 text-indigo-600" />
+            <div className="p-5 border-b flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-indigo-100 rounded-xl flex items-center justify-center">
+                  <Users className="w-5 h-5 text-indigo-600" />
+                </div>
+                <h2 className="text-xl font-bold text-gray-900">All Enterprise Users</h2>
               </div>
-              <h2 className="text-2xl font-bold text-gray-900">All Users</h2>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setVendorForm({
+                    company_affiliation: "",
+                    full_name: "",
+                    email: "",
+                    phone: "",
+                    password: "",
+                    project_ids: [],
+                  });
+                  setAddVendorOpen(true);
+                }}
+                className="bg-amber-600 hover:bg-amber-700 text-white text-xs h-8"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                Add Vendor Portal Account
+              </Button>
             </div>
 
             {isLoading ? (
-              <div className="text-center py-12">
-                <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-                <p className="text-gray-600">Loading users...</p>
-              </div>
-            ) : filteredUsers.length === 0 ? (
-              <div className="text-center py-12">
-                <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600">
-                  {searchQuery ? "No users found matching your search" : "No users yet"}
-                </p>
-              </div>
+              <div className="text-center py-12">Loading users...</div>
             ) : (
-              <div className="divide-y max-h-[600px] overflow-y-auto">
-                {filteredUsers.map((user, idx) => (
-                  <motion.div
-                    key={user.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.05 }}
-                    className="p-6 hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="text-lg font-bold text-gray-900 truncate">
-                            {user.full_name}
-                          </h3>
-                          {user.inspection_role || user.role === "admin" ? (
-                            <Badge className={`${roleColors[user.inspection_role || user.role]} border font-medium`}>
-                              {roleLabels[user.inspection_role || user.role] || user.inspection_role || user.role}
+              <div className="divide-y max-h-[650px] overflow-y-auto">
+                {filteredUsers.map((user) => {
+                  const rKey = user.inspection_role || user.role;
+                  const userProjs = projects.filter((p) =>
+                    (user.project_ids || []).map((x) => String(x).toLowerCase()).includes(String(p.id).toLowerCase())
+                  );
+                  return (
+                    <div key={user.id} className="p-5 hover:bg-gray-50 transition-colors">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <h3 className="text-base font-bold text-gray-900">
+                              {user.full_name}
+                            </h3>
+                            <Badge className={`${roleColors[rKey] || "bg-gray-100 text-gray-700"} border font-medium`}>
+                              {roleLabels[rKey] || rKey || "Unassigned"}
                             </Badge>
-                          ) : (
-                            <Badge className="bg-gray-100 text-gray-600 border-gray-300">
-                              No Role Assigned
-                            </Badge>
-                          )}
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-gray-600">
+                            <span className="flex items-center gap-1">
+                              <Mail className="w-3.5 h-3.5" />
+                              {user.email}
+                            </span>
+                            {user.department && <span>• Dept: <b>{user.department}</b></span>}
+                            {user.company_affiliation && <span>• Co: <b>{user.company_affiliation}</b></span>}
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                            <span className="text-[11px] text-gray-500 font-semibold">Assigned Projects:</span>
+                            {rKey === "admin" ? (
+                              <Badge variant="outline" className="text-[10px] bg-red-50 text-red-700 border-red-200">
+                                Global Enterprise Access (All Projects)
+                              </Badge>
+                            ) : userProjs.length > 0 ? (
+                              userProjs.map((up) => (
+                                <Badge key={up.id} variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200">
+                                  [{up.code}] {up.name}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-[11px] text-amber-600 italic">No projects assigned</span>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
-                          <Mail className="w-4 h-4" />
-                          <span>{user.email}</span>
+
+                        <div className="flex gap-2 shrink-0">
+                          <Button onClick={() => handleEdit(user)} variant="outline" size="sm" className="text-xs h-8">
+                            <Edit className="w-3.5 h-3.5 mr-1.5" />
+                            Edit Role &amp; Projects
+                          </Button>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                          {user.company_affiliation && (
-                            <div>
-                              <span className="text-gray-500">Company:</span>{" "}
-                              <span className="text-gray-900 font-medium">{user.company_affiliation}</span>
-                            </div>
-                          )}
-                          {user.phone && (
-                            <div>
-                              <span className="text-gray-500">Phone:</span>{" "}
-                              <span className="text-gray-900 font-medium">{user.phone}</span>
-                            </div>
-                          )}
-                          {user.department && (
-                            <div>
-                              <span className="text-gray-500">Department:</span>{" "}
-                              <span className="text-gray-900 font-medium">{user.department}</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex gap-2 flex-shrink-0">
-                        <Button
-                          onClick={() => handleEdit(user)}
-                          variant="outline"
-                          size="sm"
-                        >
-                          <Edit className="w-4 h-4 mr-2" />
-                          Edit Role
-                        </Button>
-                        <Button
-                          onClick={() => setDeactivatingUser(user)}
-                          variant="outline"
-                          size="sm"
-                          className="text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50"
-                        >
-                          <UserX className="w-4 h-4 mr-2" />
-                          Deactivate
-                        </Button>
                       </div>
                     </div>
-                  </motion.div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </Card>
         </TabsContent>
 
-        {/* Projects Tab */}
-        <TabsContent value="projects" className="mt-6 space-y-6">
-          {/* Add Project Button */}
-          <div className="flex justify-end">
-            <Button
-              onClick={() => setIsAddingProject(true)}
-              className="bg-indigo-600 hover:bg-indigo-700"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Project
-            </Button>
-          </div>
-
-          {/* Projects Table */}
-          <Card className="elevation-2">
-            <div className="p-6 border-b flex items-center gap-3">
-              <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
-                <FolderGit2 className="w-5 h-5 text-indigo-600" />
-              </div>
-              <h2 className="text-2xl font-bold text-gray-900">All Projects</h2>
-            </div>
-
-            {projects.length === 0 ? (
-              <div className="text-center py-12">
-                <FolderGit2 className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 mb-4">No projects yet</p>
-                <Button
-                  onClick={() => setIsAddingProject(true)}
-                  variant="outline"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Create Your First Project
-                </Button>
-              </div>
-            ) : (
-              <div className="divide-y">
-                {projects.map((project, idx) => (
-                  <motion.div
-                    key={project.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.05 }}
-                    className="p-6 hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="text-lg font-bold text-gray-900 truncate">
-                            {project.name}
-                          </h3>
-                          <Badge className={`border font-medium ${project.status === 'active' ? 'bg-green-100 text-green-800 border-green-200' :
-                            project.status === 'completed' ? 'bg-blue-100 text-blue-800 border-blue-200' :
-                              'bg-gray-100 text-gray-600 border-gray-300'
-                            }`}>
-                            {project.status === 'active' ? 'Active' :
-                              project.status === 'completed' ? 'Completed' : 'Archived'}
-                          </Badge>
-                        </div>
-                        <div className="text-sm text-gray-600 mb-3">
-                          <span className="font-mono bg-gray-100 px-2 py-1 rounded">{project.code}</span>
-                        </div>
-                        {project.description && (
-                          <p className="text-sm text-gray-700 mb-2">{project.description}</p>
-                        )}
-                      </div>
-                      <div className="flex gap-2 flex-shrink-0">
-                        <Button
-                          onClick={() => setEditingProject(project)}
-                          variant="outline"
-                          size="sm"
-                        >
-                          <Edit className="w-4 h-4 mr-2" />
-                          Edit
-                        </Button>
-                        <Button
-                          onClick={() => setDeletingProject(project)}
-                          variant="outline"
-                          size="sm"
-                          className="text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50"
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Delete
-                        </Button>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </TabsContent>
-
-        {/* Inspectors Tab */}
+        {/* ── TAB 3: INSPECTORS ── */}
         <TabsContent value="inspectors" className="mt-6 space-y-6">
           <Card className="elevation-2">
-            <div className="p-6 border-b flex items-center gap-3">
-              <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
+            <div className="p-5 border-b flex items-center gap-3">
+              <div className="w-9 h-9 bg-purple-100 rounded-xl flex items-center justify-center">
                 <UserCog className="w-5 h-5 text-purple-600" />
               </div>
-              <h2 className="text-2xl font-bold text-gray-900">Inspector Management</h2>
+              <h2 className="text-xl font-bold text-gray-900">Inspector &amp; TPI Agency Linkage</h2>
             </div>
 
             {inspectors.length === 0 ? (
-              <div className="text-center py-12">
-                <UserCog className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 mb-4">No inspectors found</p>
-                <p className="text-sm text-gray-500">Inspectors will appear here when users with Inspector role are created</p>
-              </div>
+              <div className="text-center py-12 text-gray-500">No inspectors found</div>
             ) : (
               <div className="divide-y">
-                {inspectors.map((inspector, idx) => (
-                  <motion.div
-                    key={inspector.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.05 }}
-                    className="p-6 hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="text-lg font-bold text-gray-900">
-                            {inspector.full_name}
-                          </h3>
-                          <Badge className="bg-purple-100 text-purple-800 border-purple-200 border font-medium">
-                            Inspector
-                          </Badge>
-                          {inspector.tpi_agency_id ? (
-                            <Badge className="bg-green-100 text-green-800 border-green-200 border">
-                              ✓ Linked
-                            </Badge>
-                          ) : (
-                            <Badge className="bg-amber-100 text-amber-800 border-amber-200 border">
-                              ⚠ Not Linked
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="text-sm text-gray-600 mb-3">
-                          <Mail className="w-4 h-4 inline mr-1" />
-                          {inspector.email}
-                        </div>
-                        {inspector.company && (
-                          <p className="text-sm text-gray-700 mb-2">
-                            <Building2 className="w-4 h-4 inline mr-1" />
-                            {inspector.company}
-                          </p>
-                        )}
+                {inspectors.map((inspector) => (
+                  <div key={inspector.id} className="p-5 hover:bg-gray-50 flex items-center justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-base font-bold text-gray-900">{inspector.full_name}</h3>
+                        <Badge className="bg-purple-100 text-purple-800 border-purple-200 text-xs">Inspector</Badge>
                       </div>
-                      <div className="min-w-[250px]">
-                        <Label className="text-sm font-medium mb-2 block">TPI Agency</Label>
-                        <Select
-                          value={inspector.tpi_agency_id || "none"}
-                          onValueChange={async (value) => {
-                            try {
-                              await base44.entities.Inspector.update(inspector.id, {
-                                tpi_agency_id: value === "none" ? null : value
-                              });
-                              queryClient.invalidateQueries({ queryKey: ["inspectors"] });
-                              toast.success(`Inspector linked to agency`);
-                            } catch (error) {
-                              console.error("Error updating inspector:", error);
-                              toast.error("Failed to update inspector");
-                            }
-                          }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select TPI Agency" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">None</SelectItem>
-                            {agencies.map((agency) => (
-                              <SelectItem key={agency.id} value={agency.id}>
-                                {agency.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {!inspector.tpi_agency_id && (
-                          <p className="text-xs text-amber-600 mt-1">
-                            ⚠ Inspector not linked to any agency
-                          </p>
-                        )}
-                      </div>
+                      <p className="text-xs text-gray-600">{inspector.email}</p>
                     </div>
-                  </motion.div>
+                    <div className="min-w-[240px]">
+                      <Label className="text-xs font-medium mb-1 block">Linked TPI Agency</Label>
+                      <Select
+                        value={inspector.tpi_agency_id || "none"}
+                        onValueChange={async (value) => {
+                          try {
+                            await base44.entities.Inspector.update(inspector.id, {
+                              tpi_agency_id: value === "none" ? null : value,
+                            });
+                            queryClient.invalidateQueries({ queryKey: ["inspectors"] });
+                            toast.success("Inspector linked to TPI agency");
+                          } catch (error) {
+                            toast.error("Failed to update inspector");
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Select TPI Agency" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {agencies.map((agency) => (
+                            <SelectItem key={agency.id} value={agency.id}>
+                              {agency.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
@@ -570,375 +740,277 @@ export default function UserManagement() {
 
       {/* Edit User Dialog */}
       <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit User Access & Role</DialogTitle>
+            <DialogTitle>Edit User Role &amp; Assigned Projects</DialogTitle>
           </DialogHeader>
 
           {editingUser && (
-            <div className="space-y-6 py-4">
-              {/* User Info */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h4 className="font-bold text-gray-900 mb-1">{editingUser.full_name}</h4>
-                <p className="text-sm text-gray-600">{editingUser.email}</p>
+            <div className="space-y-4 py-3 text-xs">
+              <div className="bg-gray-50 rounded-lg p-3">
+                <h4 className="font-bold text-sm text-gray-900">{editingUser.full_name}</h4>
+                <p className="text-xs text-gray-600">{editingUser.email}</p>
               </div>
 
-              {/* Role Selection */}
-              <div className="space-y-2">
-                <Label htmlFor="inspection_role" className="text-base font-semibold">
-                  Inspection Role *
-                </Label>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">System &amp; Departmental Role *</Label>
                 <Select
                   value={editFormData.inspection_role}
                   onValueChange={(value) =>
                     setEditFormData({ ...editFormData, inspection_role: value })
                   }
                 >
-                  <SelectTrigger className="h-11">
+                  <SelectTrigger className="h-9 text-xs">
                     <SelectValue placeholder="Select Role" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="admin">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-red-500" />
-                        <span>Admin - Full Access</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="inspection_engineer">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-blue-500" />
-                        <span>Inspection Engineer - Own Notifications</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="qc_manager">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-green-500" />
-                        <span>QC Manager - Project Oversight</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="inspector">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-purple-500" />
-                        <span>Inspector - Profile Management</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="inspection_agency">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-amber-500" />
-                        <span>Inspection Agency - Inspector Management</span>
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-gray-500">
-                  This determines what the user can access in the system
-                </p>
-              </div>
-
-              {/* Company Affiliation */}
-              <div className="space-y-2">
-                <Label htmlFor="company_affiliation" className="text-base font-semibold">
-                  Company Affiliation
-                </Label>
-                <Select
-                  value={editFormData.company_affiliation}
-                  onValueChange={(value) =>
-                    setEditFormData({ ...editFormData, company_affiliation: value })
-                  }
-                >
-                  <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Select Company/Agency" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={null}>None</SelectItem>
-                    {agencies.map((agency) => (
-                      <SelectItem key={agency.id} value={agency.name}>
-                        {agency.name}
+                    {Object.entries(roleLabels).map(([val, label]) => (
+                      <SelectItem key={val} value={val} className="text-xs">
+                        {label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-gray-500">
-                  For inspectors and agencies - links them to a TPI agency
-                </p>
               </div>
 
-              {/* Phone */}
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone Number</Label>
-                <Input
-                  id="phone"
-                  value={editFormData.phone}
-                  onChange={(e) =>
-                    setEditFormData({ ...editFormData, phone: e.target.value })
-                  }
-                  placeholder="+1 (555) 123-4567"
-                  className="h-11"
-                />
-              </div>
-
-              {/* Department */}
-              <div className="space-y-2">
-                <Label htmlFor="department">Department</Label>
-                <Input
-                  id="department"
-                  value={editFormData.department}
-                  onChange={(e) =>
-                    setEditFormData({ ...editFormData, department: e.target.value })
-                  }
-                  placeholder="e.g., Quality Control, Engineering"
-                  className="h-11"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Assigned Projects</Label>
-                <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2 bg-gray-50">
-                  {projects.map((project) => (
-                    <label key={project.id} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                        checked={(editFormData.project_ids || []).includes(project.id)}
-                        onChange={(e) => {
-                          const currentIds = editFormData.project_ids || [];
-                          let newIds;
-                          if (e.target.checked) {
-                            newIds = [...currentIds, project.id];
-                          } else {
-                            newIds = currentIds.filter(id => id !== project.id);
-                          }
-                          setEditFormData({ ...editFormData, project_ids: newIds });
-                        }}
-                      />
-                      <span className="text-sm text-gray-700">{project.name}</span>
-                    </label>
-                  ))}
-                  {projects.length === 0 && (
-                    <p className="text-sm text-gray-500 italic">No projects available</p>
-                  )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs font-semibold">Department</Label>
+                  <Input
+                    value={editFormData.department}
+                    onChange={(e) =>
+                      setEditFormData({ ...editFormData, department: e.target.value })
+                    }
+                    className="h-8 text-xs mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold">Company Affiliation</Label>
+                  <Input
+                    value={editFormData.company_affiliation}
+                    onChange={(e) =>
+                      setEditFormData({ ...editFormData, company_affiliation: e.target.value })
+                    }
+                    className="h-8 text-xs mt-1"
+                  />
                 </div>
               </div>
 
-              {/* Role Descriptions */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h5 className="font-semibold text-blue-900 mb-2">Role Permissions:</h5>
-                <div className="space-y-2 text-sm text-blue-800">
-                  <p><strong>Admin:</strong> Full access to everything</p>
-                  <p><strong>Inspection Engineer:</strong> Upload & manage own notifications</p>
-                  <p><strong>QC Manager:</strong> View & edit all notifications (oversight)</p>
-                  <p><strong>Inspector:</strong> Manage profile, upload CV & certificates</p>
-                  <p><strong>Inspection Agency:</strong> Manage inspector credentials</p>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Assigned Projects</Label>
+                <div className="border rounded-lg p-3 max-h-44 overflow-y-auto space-y-2 bg-gray-50">
+                  {projects.map((project) => {
+                    const isChecked = (editFormData.project_ids || [])
+                      .map((x) => String(x).toLowerCase())
+                      .includes(String(project.id).toLowerCase());
+                    return (
+                      <label key={project.id} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="rounded border-gray-300 text-indigo-600"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            const currentIds = editFormData.project_ids || [];
+                            const newIds = e.target.checked
+                              ? [...currentIds, project.id]
+                              : currentIds.filter(
+                                  (id) => String(id).toLowerCase() !== String(project.id).toLowerCase()
+                                );
+                            setEditFormData({ ...editFormData, project_ids: newIds });
+                          }}
+                        />
+                        <span className="text-xs font-medium text-gray-800">
+                          [{project.code}] {project.name}
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="flex gap-3 justify-between pt-4 border-t">
-                <Button
-                  variant="outline"
-                  onClick={() => setDeactivatingUser(editingUser)}
-                  disabled={updateUserMutation.isPending}
-                  className="text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50"
-                >
-                  <UserX className="w-4 h-4 mr-2" />
-                  Deactivate User
+              <div className="flex justify-end gap-2 pt-3 border-t">
+                <Button variant="outline" size="sm" onClick={() => setEditingUser(null)}>
+                  Cancel
                 </Button>
-                <div className="flex gap-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => setEditingUser(null)}
-                    disabled={updateUserMutation.isPending}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleSave}
-                    disabled={updateUserMutation.isPending}
-                    className="bg-indigo-600 hover:bg-indigo-700"
-                  >
-                    {updateUserMutation.isPending ? "Saving..." : "Save Changes"}
-                  </Button>
-                </div>
+                <Button
+                  size="sm"
+                  onClick={handleSave}
+                  disabled={updateUserMutation.isPending}
+                  className="bg-indigo-600 hover:bg-indigo-700"
+                >
+                  Save Changes
+                </Button>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* Deactivate User Dialog */}
-      <AlertDialog open={!!deactivatingUser} onOpenChange={() => setDeactivatingUser(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Deactivate User</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to deactivate <strong>{deactivatingUser?.full_name}</strong>?
-              This will remove their inspection role and access to the system.
-              <br /><br />
-              <strong>Note:</strong> Base44 does not allow permanent user deletion. The user account will remain but will be marked as deactivated.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                deactivateUserMutation.mutate({ id: deactivatingUser.id });
-                setEditingUser(null);
-              }}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              Deactivate User
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Add/Edit Project Dialog */}
-      <Dialog open={isAddingProject || !!editingProject} onOpenChange={() => {
-        setIsAddingProject(false);
-        setEditingProject(null);
-        setProjectFormData({ name: "", code: "", description: "", status: "active" });
-      }}>
-        <DialogContent className="max-w-2xl">
+      {/* Add/Edit Project Dialog with Expediting Manager & QC Manager Assignment */}
+      <Dialog
+        open={isAddingProject || !!editingProject}
+        onOpenChange={() => {
+          setIsAddingProject(false);
+          setEditingProject(null);
+        }}
+      >
+        <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{editingProject ? "Edit Project" : "Add New Project"}</DialogTitle>
+            <DialogTitle>
+              {editingProject ? "Edit Project & Department Managers" : "Create New Project & Assign Managers"}
+            </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
-            {/* Project Name */}
-            <div className="space-y-2">
-              <Label htmlFor="project_name">Project Name *</Label>
+          <div className="space-y-3 py-2 text-xs">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs font-semibold">Project Code *</Label>
+                <Input
+                  value={editingProject ? editingProject.code : projectFormData.code}
+                  onChange={(e) =>
+                    editingProject
+                      ? setEditingProject({ ...editingProject, code: e.target.value })
+                      : setProjectFormData({ ...projectFormData, code: e.target.value })
+                  }
+                  className="h-8 text-xs font-mono mt-1"
+                  placeholder="PRJ-2026-01"
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Client / Operator</Label>
+                <Input
+                  value={editingProject ? editingProject.client_name || "" : projectFormData.client_name}
+                  onChange={(e) =>
+                    editingProject
+                      ? setEditingProject({ ...editingProject, client_name: e.target.value })
+                      : setProjectFormData({ ...projectFormData, client_name: e.target.value })
+                  }
+                  className="h-8 text-xs mt-1"
+                  placeholder="ADNOC / QatarEnergy"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold">Project Name *</Label>
               <Input
-                id="project_name"
                 value={editingProject ? editingProject.name : projectFormData.name}
-                onChange={(e) => {
-                  if (editingProject) {
-                    setEditingProject({ ...editingProject, name: e.target.value });
-                  } else {
-                    setProjectFormData({ ...projectFormData, name: e.target.value });
-                  }
-                }}
-                placeholder="e.g., Tank Storage Facility Construction"
-                className="h-11"
+                onChange={(e) =>
+                  editingProject
+                    ? setEditingProject({ ...editingProject, name: e.target.value })
+                    : setProjectFormData({ ...projectFormData, name: e.target.value })
+                }
+                className="h-8 text-xs mt-1"
+                placeholder="Offshore Gas Expansion Project"
               />
             </div>
 
-            {/* Project Code */}
-            <div className="space-y-2">
-              <Label htmlFor="project_code">Project Code *</Label>
-              <Input
-                id="project_code"
-                value={editingProject ? editingProject.code : projectFormData.code}
-                onChange={(e) => {
-                  if (editingProject) {
-                    setEditingProject({ ...editingProject, code: e.target.value });
-                  } else {
-                    setProjectFormData({ ...projectFormData, code: e.target.value });
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+              <div className="p-2.5 rounded-lg bg-indigo-50/70 border border-indigo-200">
+                <Label className="text-xs font-bold text-indigo-900 block mb-1">
+                  Assign Expediting Manager *
+                </Label>
+                <Select
+                  value={
+                    editingProject
+                      ? editingProject.expediting_manager_id || ""
+                      : projectFormData.expediting_manager_id
                   }
-                }}
-                placeholder="e.g., PRJ-2025-001"
-                className="h-11 font-mono"
-              />
-              <p className="text-xs text-gray-500">Unique identifier for this project</p>
+                  onValueChange={(v) =>
+                    editingProject
+                      ? setEditingProject({ ...editingProject, expediting_manager_id: v })
+                      : setProjectFormData({ ...projectFormData, expediting_manager_id: v })
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs bg-white">
+                    <SelectValue placeholder="Select Expediting Manager" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {expManagers.map((u) => (
+                      <SelectItem key={u.id} value={u.id} className="text-xs">
+                        {u.full_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-emerald-50/70 border border-emerald-200">
+                <Label className="text-xs font-bold text-emerald-900 block mb-1">
+                  Assign Inspection / QC Manager *
+                </Label>
+                <Select
+                  value={
+                    editingProject
+                      ? editingProject.inspection_manager_id || ""
+                      : projectFormData.inspection_manager_id
+                  }
+                  onValueChange={(v) =>
+                    editingProject
+                      ? setEditingProject({ ...editingProject, inspection_manager_id: v })
+                      : setProjectFormData({ ...projectFormData, inspection_manager_id: v })
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs bg-white">
+                    <SelectValue placeholder="Select Inspection / QC Manager" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {inspManagers.map((u) => (
+                      <SelectItem key={u.id} value={u.id} className="text-xs">
+                        {u.full_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
-            {/* Description */}
-            <div className="space-y-2">
-              <Label htmlFor="project_description">Description</Label>
+            <div>
+              <Label className="text-xs font-semibold">Project Description</Label>
               <Textarea
-                id="project_description"
-                value={editingProject ? (editingProject.description || "") : projectFormData.description}
-                onChange={(e) => {
-                  if (editingProject) {
-                    setEditingProject({ ...editingProject, description: e.target.value });
-                  } else {
-                    setProjectFormData({ ...projectFormData, description: e.target.value });
-                  }
-                }}
-                placeholder="Brief description of the project..."
-                rows={3}
-                className="resize-none"
+                value={editingProject ? editingProject.description || "" : projectFormData.description}
+                onChange={(e) =>
+                  editingProject
+                    ? setEditingProject({ ...editingProject, description: e.target.value })
+                    : setProjectFormData({ ...projectFormData, description: e.target.value })
+                }
+                rows={2}
+                className="text-xs mt-1"
               />
             </div>
 
-            {/* Status */}
-            <div className="space-y-2">
-              <Label htmlFor="project_status">Status *</Label>
-              <Select
-                value={editingProject ? editingProject.status : projectFormData.status}
-                onValueChange={(value) => {
-                  if (editingProject) {
-                    setEditingProject({ ...editingProject, status: value });
-                  } else {
-                    setProjectFormData({ ...projectFormData, status: value });
-                  }
+            <div className="flex justify-end gap-2 pt-3 border-t">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setIsAddingProject(false);
+                  setEditingProject(null);
                 }}
               >
-                <SelectTrigger className="h-11">
-                  <SelectValue placeholder="Select Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-green-500" />
-                      <span>Active</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="completed">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-blue-500" />
-                      <span>Completed</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="archived">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-gray-500" />
-                      <span>Archived</span>
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const target = editingProject || projectFormData;
+                    const res = await saveProjectGovernance({
+                      project_id: editingProject ? editingProject.id : null,
+                      ...target,
+                    });
+                    toast.success(res.message);
+                    setIsAddingProject(false);
+                    setEditingProject(null);
+                  } catch (err) {
+                    toast.error(err.message || "Failed to save project");
+                  }
+                }}
+                className="bg-indigo-600 hover:bg-indigo-700"
+              >
+                Save Project &amp; Assign Managers
+              </Button>
             </div>
-          </div>
-
-          <div className="flex gap-3 justify-end pt-4 border-t">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setIsAddingProject(false);
-                setEditingProject(null);
-                setProjectFormData({ name: "", code: "", description: "", status: "active" });
-              }}
-              disabled={createProjectMutation.isPending || updateProjectMutation.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (editingProject) {
-                  updateProjectMutation.mutate({
-                    id: editingProject.id,
-                    data: {
-                      name: editingProject.name,
-                      code: editingProject.code,
-                      description: editingProject.description,
-                      status: editingProject.status,
-                    }
-                  });
-                } else {
-                  createProjectMutation.mutate(projectFormData);
-                }
-              }}
-              disabled={
-                createProjectMutation.isPending ||
-                updateProjectMutation.isPending ||
-                !(editingProject ? editingProject.name && editingProject.code : projectFormData.name && projectFormData.code)
-              }
-              className="bg-indigo-600 hover:bg-indigo-700"
-            >
-              {(createProjectMutation.isPending || updateProjectMutation.isPending)
-                ? "Saving..."
-                : editingProject ? "Update Project" : "Create Project"}
-            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -950,7 +1022,6 @@ export default function UserManagement() {
             <AlertDialogTitle>Delete Project</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete <strong>{deletingProject?.name}</strong>?
-              This action cannot be undone and will remove all project associations.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -964,6 +1035,136 @@ export default function UserManagement() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 2-Tier Project & PO Allocation Hub Modal */}
+      <ProjectPoAllocationDialog
+        open={allocationModalOpen}
+        onOpenChange={setAllocationModalOpen}
+        defaultTab={allocationDefaultTab}
+        initialProjectId={allocationProjId}
+        onSuccess={() => {
+          refetchGovernance();
+          queryClient.invalidateQueries({ queryKey: ["projects"] });
+          queryClient.invalidateQueries({ queryKey: ["users"] });
+        }}
+      />
+
+      {/* Register New Vendor Portal User Dialog */}
+      <Dialog open={addVendorOpen} onOpenChange={setAddVendorOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Building2 className="w-4 h-4 text-amber-600" />
+              Register Vendor / Supplier Portal Account
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs font-semibold">Supplier / Company Name *</Label>
+                <Input
+                  value={vendorForm.company_affiliation}
+                  onChange={(e) => setVendorForm({ ...vendorForm, company_affiliation: e.target.value })}
+                  placeholder="e.g., SNY Valves Ltd."
+                  className="h-8 text-xs mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Contact Full Name</Label>
+                <Input
+                  value={vendorForm.full_name}
+                  onChange={(e) => setVendorForm({ ...vendorForm, full_name: e.target.value })}
+                  placeholder="e.g., Ahmed Al-Kuwari"
+                  className="h-8 text-xs mt-1"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs font-semibold">Login Email</Label>
+                <Input
+                  value={vendorForm.email}
+                  onChange={(e) => setVendorForm({ ...vendorForm, email: e.target.value })}
+                  placeholder="vendor@sny.com (auto if blank)"
+                  className="h-8 text-xs font-mono mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Phone</Label>
+                <Input
+                  value={vendorForm.phone}
+                  onChange={(e) => setVendorForm({ ...vendorForm, phone: e.target.value })}
+                  placeholder="+971-50-000-0000"
+                  className="h-8 text-xs mt-1"
+                />
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold">Assigned Projects (Optional)</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-32 overflow-y-auto border rounded-lg p-2 mt-1 bg-gray-50">
+                {projects.map((p) => {
+                  const checked = vendorForm.project_ids.includes(p.id);
+                  return (
+                    <label key={p.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...vendorForm.project_ids, p.id]
+                            : vendorForm.project_ids.filter((x) => x !== p.id);
+                          setVendorForm({ ...vendorForm, project_ids: next });
+                        }}
+                      />
+                      <span className="truncate">[{p.code}] {p.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t">
+              <Button variant="outline" size="sm" onClick={() => setAddVendorOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={savingVendor}
+                onClick={async () => {
+                  if (!vendorForm.company_affiliation.trim()) {
+                    toast.error("Supplier / Company Name is required");
+                    return;
+                  }
+                  setSavingVendor(true);
+                  try {
+                    const res = await fetch("/api/v1/governance/vendors", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(vendorForm),
+                    });
+                    const json = await res.json();
+                    if (!res.ok || !json.ok) {
+                      toast.error(json.detail || "Failed to register vendor");
+                    } else {
+                      toast.success(json.message);
+                      queryClient.invalidateQueries({ queryKey: ["users"] });
+                      queryClient.invalidateQueries({ queryKey: ["governance-overview"] });
+                      window.dispatchEvent(new CustomEvent("governance-updated"));
+                      setAddVendorOpen(false);
+                    }
+                  } catch (err) {
+                    toast.error("Error saving vendor");
+                  } finally {
+                    setSavingVendor(false);
+                  }
+                }}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                Save Vendor Account
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

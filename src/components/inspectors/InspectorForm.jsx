@@ -104,7 +104,7 @@ export default function InspectorForm({ inspector, onSave, onCancel, isSaving })
       const { file_url } = await base44.integrations.Core.UploadFile({
         file: file,
       });
-      
+
       setFormData((prev) => ({ ...prev, cv_url: file_url }));
 
       const result = await base44.integrations.Core.ExtractDataFromUploadedFile({
@@ -165,23 +165,20 @@ export default function InspectorForm({ inspector, onSave, onCancel, isSaving })
 
     setIsInviting(true);
     try {
-      // Send invitation email
-      await base44.integrations.Core.SendEmail({
-        to: formData.email,
-        subject: "Invitation to InspectFlow",
-        body: `Hello ${formData.full_name},\n\nYou have been invited to join InspectFlow as an inspector.\n\nPlease register/login at: ${window.location.origin}\n\nBest regards,\nInspectFlow Team`
-      });
-
-      // Update inspector record if it exists (inspector object passed prop)
-      if (inspector?.id) {
-        await base44.entities.Inspector.update(inspector.id, { is_invited: true });
-        setFormData(prev => ({ ...prev, is_invited: true }));
-      } else {
-        // If creating new, just update local state so it saves with true
-        setFormData(prev => ({ ...prev, is_invited: true }));
+      if (base44.integrations?.Core?.SendEmail) {
+        await base44.integrations.Core.SendEmail({
+          to: formData.email,
+          subject: "Invitation to InspectFlow",
+          body: `Hello ${formData.full_name},\n\nYou have been invited to join InspectFlow as an inspector.\n\nPlease register/login at: ${window.location.origin}\n\nBest regards,\nInspectFlow Team`
+        });
       }
 
-      toast.success(`Invitation sent to ${formData.email}`);
+      if (inspector?.id) {
+        await base44.entities.Inspector.update(inspector.id, { is_invited: true });
+      }
+      setFormData(prev => ({ ...prev, is_invited: true }));
+
+      toast.success(`Inspector marked as invited (${formData.email}). Create or activate their user account under Admin if not registered yet.`);
     } catch (error) {
       console.error("Error sending invitation:", error);
       toast.error("Failed to send invitation email");
@@ -193,7 +190,7 @@ export default function InspectorForm({ inspector, onSave, onCancel, isSaving })
   const handleSubmit = async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    
+
     // Validate required fields
     if (!formData.full_name || !formData.email) {
       toast.error("Please fill in all required fields (Name and Email)");
@@ -201,24 +198,24 @@ export default function InspectorForm({ inspector, onSave, onCancel, isSaving })
     }
 
     console.log("Submitting inspector form with data:", formData);
-    
+
     // Prepare data with proper types
     const submitData = {
       ...formData,
       years_of_experience: formData.years_of_experience ? Number(formData.years_of_experience) : undefined,
     };
-    
+
     try {
       // Call onSave which will handle the mutation - await it
       await onSave(submitData);
       console.log("Inspector saved successfully");
-      
+
       // Then, create/update user account if checkbox is selected
       if (!inspector && createUserAccount && formData.email) {
         try {
           const users = await base44.entities.User.list();
           const userExists = users.find(u => u.email === formData.email);
-          
+
           if (!userExists) {
             await base44.entities.User.create({
               email: formData.email,
@@ -330,7 +327,7 @@ export default function InspectorForm({ inspector, onSave, onCancel, isSaving })
               </>
             )}
           </Button>
-          
+
           {formData.cv_url && (
             <Alert className="bg-green-50 border-green-200">
               <CheckCircle className="h-4 w-4 text-green-600" />
@@ -413,16 +410,16 @@ export default function InspectorForm({ inspector, onSave, onCancel, isSaving })
                 )}
               </Button>
               {formData.is_invited && (
-                 <Button
-                   type="button"
-                   variant="ghost"
-                   size="sm"
-                   onClick={handleInvite}
-                   disabled={isInviting}
-                   className="ml-2 text-gray-500 text-xs"
-                 >
-                   Resend
-                 </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleInvite}
+                  disabled={isInviting}
+                  className="ml-2 text-gray-500 text-xs"
+                >
+                  Resend
+                </Button>
               )}
             </div>
           )}

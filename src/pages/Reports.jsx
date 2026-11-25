@@ -23,6 +23,7 @@ import {
   Paperclip,
   AlertTriangle,
   Eye,
+  PackageCheck,
 } from "lucide-react";
 import { format, isValid, parseISO } from "date-fns";
 import { Card } from "@/components/ui/card";
@@ -44,6 +45,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { useProject } from "@/components/context/ProjectContext";
 
 // Helper function to safely format dates
 const formatDate = (dateString, formatStr = "MMM d, yyyy HH:mm") => {
@@ -81,6 +83,7 @@ const handleDownload = async (url, name) => {
 };
 
 export default function ReportsPage() {
+  const { selectedProjectId } = useProject();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("inspection");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -90,6 +93,7 @@ export default function ReportsPage() {
   const [selectedInspection, setSelectedInspection] = useState(null);
   const [viewingDocumentUrl, setViewingDocumentUrl] = useState(null);
   const [viewingDocumentTitle, setViewingDocumentTitle] = useState("");
+  const [viewingIrcItems, setViewingIrcItems] = useState(null);
 
   const queryClient = useQueryClient();
 
@@ -127,13 +131,19 @@ export default function ReportsPage() {
   const isInspector = currentUser?.inspection_role === "inspector";
   const canDelete = isAdmin || isInspectionEngineer || isQCManager;
 
-  // Filter inspections based on role
+  // Filter inspections based on role and active project
   const roleFilteredInspections = React.useMemo(() => {
-    if (isInspector) {
-      return inspections.filter(inspection => inspection.assigned_inspector_email === currentUser?.email);
+    let base = inspections;
+    if (selectedProjectId && selectedProjectId !== "all") {
+      base = base.filter(
+        (i) => String(i.project_id || "").toLowerCase() === String(selectedProjectId).toLowerCase()
+      );
     }
-    return inspections;
-  }, [inspections, currentUser, isInspector]);
+    if (isInspector) {
+      return base.filter(inspection => inspection.assigned_inspector_email === currentUser?.email);
+    }
+    return base;
+  }, [inspections, currentUser, isInspector, selectedProjectId]);
 
   // Aggregate all reports
   const allReports = roleFilteredInspections.flatMap((inspection) => {
@@ -155,7 +165,7 @@ export default function ReportsPage() {
 
     (inspection.release_notes || []).forEach((report) => {
       const associatedReport = (inspection.inspection_reports || []).find(r => r.is_final_report);
-      
+
       reports.push({
         ...report,
         type: "Release Note",
@@ -166,6 +176,8 @@ export default function ReportsPage() {
         report_number: associatedReport?.name || "-",
         inspectionId: inspection.id,
         inspection: inspection,
+        items_released: report.items_released || inspection.items_released || [],
+        remarks: report.remarks || inspection.irc_remarks || "",
       });
     });
 
@@ -235,7 +247,7 @@ export default function ReportsPage() {
   };
 
   const exportToExcel = () => {
-    const headers = activeTab === "inspection" 
+    const headers = activeTab === "inspection"
       ? ["Report Name", "Notification #", "PO Number", "Supplier", "Findings", "Uploaded By", "Upload Date"]
       : ["Report Name", "Notification Number", "Report Number", "PO Number", "Supplier", "Uploaded By", "Upload Date"];
 
@@ -244,11 +256,11 @@ export default function ReportsPage() {
         report.name || "",
         report.inspection_number || "",
       ];
-      
+
       if (activeTab === "release") {
         baseData.push(report.report_number || "");
       }
-      
+
       if (activeTab === "inspection") {
         baseData.push(
           report.po_number || "",
@@ -265,7 +277,7 @@ export default function ReportsPage() {
           formatDate(report.uploaded_date, "yyyy-MM-dd HH:mm")
         );
       }
-      
+
       return baseData;
     });
 
@@ -391,8 +403,8 @@ export default function ReportsPage() {
                   <TableBody>
                     {filteredReports.map((report, index) => {
                       const findingsCount = report.findings?.length || 0;
-                      const hasCriticalFindings = report.findings?.some(f => 
-                        f.severity?.toLowerCase().includes("critical") || 
+                      const hasCriticalFindings = report.findings?.some(f =>
+                        f.severity?.toLowerCase().includes("critical") ||
                         f.severity?.toLowerCase().includes("major")
                       );
 
@@ -454,30 +466,33 @@ export default function ReportsPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-1">
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
-                                onClick={() => handleViewDocument(report.url, report.name)}
-                                title="View Document"
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                disabled={!report.url}
+                                className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 disabled:opacity-30"
+                                onClick={() => report.url && handleViewDocument(report.url, report.name)}
+                                title={report.url ? "View Document" : "No file attached"}
                               >
                                 <Eye className="w-4 h-4" />
                               </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                onClick={() => window.open(report.url, '_blank')}
-                                title="Open in New Tab"
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                disabled={!report.url}
+                                className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 disabled:opacity-30"
+                                onClick={() => report.url && window.open(report.url, '_blank', 'noopener,noreferrer')}
+                                title={report.url ? "Open in New Tab" : "No file attached"}
                               >
                                 <ExternalLink className="w-4 h-4" />
                               </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
-                                onClick={() => handleDownload(report.url, report.name)}
-                                title="Download"
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                disabled={!report.url}
+                                className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50 disabled:opacity-30"
+                                onClick={() => report.url && handleDownload(report.url, report.name)}
+                                title={report.url ? "Download" : "No file attached"}
                               >
                                 <Download className="w-4 h-4" />
                               </Button>
@@ -592,6 +607,24 @@ export default function ReportsPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1">
+                            {report.items_released && report.items_released.length > 0 && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                                onClick={() => setViewingIrcItems({
+                                  reportName: report.name,
+                                  poNumber: report.po_number,
+                                  inspectionNumber: report.inspection_number,
+                                  supplier: report.supplier,
+                                  items: report.items_released,
+                                  remarks: report.remarks
+                                })}
+                                title="View Released BOM Items & Remarks"
+                              >
+                                <PackageCheck className="w-4 h-4" />
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"
@@ -601,30 +634,33 @@ export default function ReportsPage() {
                             >
                               <Paperclip className="w-4 h-4" />
                             </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
-                              onClick={() => handleViewDocument(report.url, report.name)}
-                              title="View Document"
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled={!report.url}
+                              className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 disabled:opacity-30"
+                              onClick={() => report.url && handleViewDocument(report.url, report.name)}
+                              title={report.url ? "View Document" : "No file attached"}
                             >
                               <Eye className="w-4 h-4" />
                             </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                              onClick={() => window.open(report.url, '_blank')}
-                              title="Open in New Tab"
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled={!report.url}
+                              className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 disabled:opacity-30"
+                              onClick={() => report.url && window.open(report.url, '_blank', 'noopener,noreferrer')}
+                              title={report.url ? "Open in New Tab" : "No file attached"}
                             >
                               <ExternalLink className="w-4 h-4" />
                             </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
-                              onClick={() => handleDownload(report.url, report.name)}
-                              title="Download"
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled={!report.url}
+                              className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50 disabled:opacity-30"
+                              onClick={() => report.url && handleDownload(report.url, report.name)}
+                              title={report.url ? "Download" : "No file attached"}
                             >
                               <Download className="w-4 h-4" />
                             </Button>
@@ -721,25 +757,25 @@ export default function ReportsPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-1">
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
                                 onClick={() => handleViewDocument(testReport.url, testReport.name)}
                               >
                                 <Eye className="w-4 h-4" />
                               </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                                 onClick={() => window.open(testReport.url, '_blank')}
                               >
                                 <ExternalLink className="w-4 h-4" />
                               </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
                                 onClick={() => handleDownload(testReport.url, testReport.name)}
                               >
@@ -811,6 +847,104 @@ export default function ReportsPage() {
               title="Document Viewer"
             />
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Itemized Released BOM Dialog */}
+      <Dialog open={!!viewingIrcItems} onOpenChange={() => setViewingIrcItems(null)}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-emerald-800">
+              <PackageCheck className="w-5 h-5 text-emerald-600" />
+              <span>Itemized Released BOM — Inspection Release Certificate</span>
+            </DialogTitle>
+          </DialogHeader>
+          {viewingIrcItems && (
+            <div className="space-y-4">
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <span className="text-gray-500 block">Certificate:</span>
+                    <span className="font-bold text-gray-900 text-sm">{viewingIrcItems.reportName}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 block">PO Number:</span>
+                    <span className="font-bold font-mono text-indigo-700 text-sm">{viewingIrcItems.poNumber || "-"}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 block">Notification #:</span>
+                    <span className="font-semibold text-gray-800">{viewingIrcItems.inspectionNumber || "-"}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 block">Supplier:</span>
+                    <span className="font-semibold text-gray-800">{viewingIrcItems.supplier || "-"}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Inspector Remarks */}
+              {viewingIrcItems.remarks && (
+                <div className="bg-blue-50/60 border border-blue-200 rounded-xl p-3.5">
+                  <h5 className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-1">
+                    Inspector Release Remarks &amp; Clearance Findings:
+                  </h5>
+                  <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">
+                    {viewingIrcItems.remarks}
+                  </p>
+                </div>
+              )}
+
+              {/* Released Items Table */}
+              <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-100/80">
+                      <TableHead className="font-semibold text-xs w-20">Item #</TableHead>
+                      <TableHead className="font-semibold text-xs">Exact Material Description (As Per PO)</TableHead>
+                      <TableHead className="font-semibold text-xs w-28 text-right">Released Qty</TableHead>
+                      <TableHead className="font-semibold text-xs w-20">Unit</TableHead>
+                      <TableHead className="font-semibold text-xs w-32">Heat / Batch #</TableHead>
+                      <TableHead className="font-semibold text-xs w-28 text-center">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(viewingIrcItems.items || []).map((item, idx) => (
+                      <TableRow key={idx} className="hover:bg-gray-50/80 text-xs">
+                        <TableCell className="font-mono font-bold text-indigo-700">
+                          {item.item_no || item.item || `#${idx + 1}`}
+                        </TableCell>
+                        <TableCell>
+                          <p className="font-medium text-gray-900 leading-snug">{item.description}</p>
+                          {item.tag_no && (
+                            <span className="text-[10px] text-gray-500 block">Tag: {item.tag_no}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right font-mono font-bold text-emerald-700">
+                          {item.released_qty ?? item.qty ?? item.quantity ?? 0}
+                        </TableCell>
+                        <TableCell className="text-gray-600">{item.unit || "EA"}</TableCell>
+                        <TableCell className="font-mono text-gray-700">{item.heat_no || item.heat_number || "-"}</TableCell>
+                        <TableCell className="text-center">
+                          <Badge className="bg-emerald-100 text-emerald-800 text-[10px] border-emerald-200">
+                            Released
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-gray-500 pt-2">
+                <span>
+                  Total items released: <strong className="text-gray-900">{viewingIrcItems.items?.length || 0}</strong>
+                </span>
+                <span className="text-emerald-700 font-medium flex items-center gap-1">
+                  ✓ Synchronized with SmartExpedit Delivery Matrix
+                </span>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

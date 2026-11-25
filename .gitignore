@@ -7,6 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Frontend build & dependencies
 node_modules
 dist
 dist-ssr
@@ -23,6 +24,33 @@ dist-ssr
 *.sln
 *.sw?
 
+# Environment variables & secrets (commit only *.example templates)
 .env
-# Environment variables
-.env.local
+.env.*
+!.env.example
+!.env.local.example
+backend/.jwt_secret
+
+# Python environments & caches
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# C# build outputs
+backend/bin/
+backend/obj/
+
+# Local SQLite databases, uploads & SmartExpedit runtime data (auto-initialized on startup)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+SmartExpedit/server/data/
+backend/wwwroot/uploads/
+uploads/
+
+# Nested clone folders / local backup workspaces
+INSPECTFLOWTEST/
+SmartExpedite&inspect/

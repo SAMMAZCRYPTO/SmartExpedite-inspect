@@ -557,7 +557,7 @@ export default function InspectionTable({ inspections, onEdit, onDelete, onViewR
                           )}
                         </Draggable>
                       ))}
-                      <TableHead className="font-bold border border-gray-300 bg-gray-100" style={{ width: 180, minWidth: 180 }}>
+                      <TableHead className="font-bold border border-gray-300 bg-gray-100 sticky right-0 z-20 shadow-[-4px_0_8px_rgba(0,0,0,0.06)]" style={{ width: 190, minWidth: 190 }}>
                         Actions
                       </TableHead>
                       {provided.placeholder}
@@ -609,7 +609,7 @@ export default function InspectionTable({ inspections, onEdit, onDelete, onViewR
                           </TableCell>
                         );
                       })}
-                      <TableCell className="border border-gray-300" style={{ width: 180, minWidth: 180 }}>
+                      <TableCell className={`border border-gray-300 sticky right-0 z-10 shadow-[-4px_0_8px_rgba(0,0,0,0.06)] ${idx % 2 === 0 ? "bg-white" : "bg-gray-50"}`} style={{ width: 190, minWidth: 190 }}>
                         <div className="flex gap-1">
                           {/* Check-In Button for Inspectors - Only visible to Inspectors */}
                           {currentUser?.inspection_role === 'inspector' && (
